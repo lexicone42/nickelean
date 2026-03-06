@@ -1,0 +1,10 @@
+name = "nickelean"
+version = "0.1.0"
+defaultTargets = ["nickelean"]
+
+[[lean_lib]]
+name = "Nickelean"
+
+[[lean_exe]]
+name = "nickelean"
+root = "Main"

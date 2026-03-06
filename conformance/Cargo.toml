@@ -1,0 +1,8 @@
+[package]
+name = "nickelean-conformance"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde_json = { version = "1", features = ["preserve_order"] }
+rand = "0.9"
