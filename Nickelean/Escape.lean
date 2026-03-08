@@ -3,13 +3,15 @@
 
   JSON string escaping and unescaping.
 
-  Phase 1: ASCII-only implementation. We escape the characters that JSON
-  requires to be escaped (RFC 8259 §7):
+  Escapes the characters that JSON requires (RFC 8259 §7):
     - quotation mark (")
     - reverse solidus (\)
     - control characters U+0000 through U+001F
 
-  Phase 2 (future): full Unicode with \uXXXX and surrogate pair handling.
+  Unescaping handles all JSON escape sequences including:
+    - two-character escapes (\", \\, \/, \n, \r, \t, \b, \f)
+    - \uXXXX BMP escapes
+    - \uD800-\uDBFF \uDC00-\uDFFF surrogate pairs for non-BMP characters
 -/
 
 /-- Characters that must be escaped in JSON strings. -/
