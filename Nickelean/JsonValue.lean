@@ -16,6 +16,9 @@ structure JsonNumber where
   den_pos : denominator > 0
   deriving Repr
 
+/-- Syntactic equality: 1/2 ≠ 2/4. This is intentional — the roundtrip
+    theorem preserves the exact representation, not the rational value.
+    For semantic equality, normalize to lowest terms first. -/
 instance : BEq JsonNumber where
   beq a b := a.numerator == b.numerator && a.denominator == b.denominator
 
