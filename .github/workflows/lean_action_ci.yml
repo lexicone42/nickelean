@@ -1,4 +1,4 @@
-name: Lean Action CI
+name: CI
 
 on:
   push:
@@ -8,7 +8,28 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
+
       - uses: leanprover/lean-action@v1
+        with:
+          lean4checker: true
+
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Run serde_json roundtrip tests
+        working-directory: conformance
+        run: cargo run -- roundtrip
+
+      - name: Run escaping tests
+        working-directory: conformance
+        run: cargo run -- escaping
+
+      - name: Run Nickel conformance tests
+        working-directory: conformance
+        run: cargo run -- nickel

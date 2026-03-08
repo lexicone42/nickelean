@@ -9,11 +9,16 @@
 //!   cargo run -- roundtrip                          # verify serde_json roundtrip
 //!   cargo run -- escaping                           # test string escaping specifically
 
+use nickel_lang_core::error::NullReporter;
+use nickel_lang_core::eval::cache::CacheImpl;
+use nickel_lang_core::program::Program;
+use nickel_lang_core::serialize::{self, ExportFormat};
 use rand::prelude::IndexedRandom;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde_json::{Map, Number, Value};
 use std::env;
+use std::io::Cursor;
 
 fn random_value(rng: &mut impl Rng, depth: u32) -> Value {
     if depth == 0 {
@@ -187,6 +192,205 @@ fn cmd_escaping() {
     println!("\nEscaping tests: {pass} passed, {fail} failed");
 }
 
+/// Evaluate a Nickel expression and return the JSON string output.
+fn eval_nickel(source: &str) -> Result<String, String> {
+    let mut program = Program::<CacheImpl>::new_from_source(
+        Cursor::new(source),
+        "<test>",
+        std::io::sink(),
+        NullReporter {},
+    )
+    .map_err(|e| format!("program creation failed: {e:?}"))?;
+
+    let value = program
+        .eval_full_for_export()
+        .map_err(|e| format!("eval failed: {e:?}"))?;
+
+    serialize::validate(ExportFormat::Json, &value)
+        .map_err(|e| format!("validation failed: {e:?}"))?;
+
+    serialize::to_string(ExportFormat::Json, &value)
+        .map_err(|e| format!("serialization failed: {e:?}"))?
+        .pipe(Ok)
+}
+
+trait Pipe: Sized {
+    fn pipe<F, R>(self, f: F) -> R
+    where
+        F: FnOnce(Self) -> R,
+    {
+        f(self)
+    }
+}
+impl<T> Pipe for T {}
+
+/// Test cases: (name, nickel expression, expected serde_json Value)
+fn nickel_test_cases() -> Vec<(&'static str, &'static str, Value)> {
+    vec![
+        // Primitives
+        ("null", "null", Value::Null),
+        ("true", "true", Value::Bool(true)),
+        ("false", "false", Value::Bool(false)),
+        ("integer", "42", Value::Number(Number::from(42))),
+        ("negative", "-7", Value::Number(Number::from(-7))),
+        ("zero", "0", Value::Number(Number::from(0))),
+        (
+            "float",
+            "3.14",
+            Value::Number(Number::from_f64(3.14).unwrap()),
+        ),
+        ("empty_string", r#""""#, Value::String(String::new())),
+        (
+            "simple_string",
+            r#""hello world""#,
+            Value::String("hello world".into()),
+        ),
+        // Strings with special characters
+        (
+            "string_quotes",
+            r#""say \"hi\"""#,
+            Value::String("say \"hi\"".into()),
+        ),
+        (
+            "string_newline",
+            r#""line1%{"\n"}line2""#,
+            Value::String("line1\nline2".into()),
+        ),
+        (
+            "string_tab",
+            r#""col1%{"\t"}col2""#,
+            Value::String("col1\tcol2".into()),
+        ),
+        // Computed values
+        (
+            "arithmetic",
+            "2 + 3",
+            Value::Number(Number::from(5)),
+        ),
+        (
+            "string_concat",
+            r#""hello" ++ " " ++ "world""#,
+            Value::String("hello world".into()),
+        ),
+        // Arrays
+        ("empty_array", "[]", Value::Array(vec![])),
+        (
+            "simple_array",
+            "[1, 2, 3]",
+            Value::Array(vec![
+                Value::Number(Number::from(1)),
+                Value::Number(Number::from(2)),
+                Value::Number(Number::from(3)),
+            ]),
+        ),
+        (
+            "mixed_array",
+            r#"[1, "two", true, null]"#,
+            Value::Array(vec![
+                Value::Number(Number::from(1)),
+                Value::String("two".into()),
+                Value::Bool(true),
+                Value::Null,
+            ]),
+        ),
+        // Records
+        (
+            "simple_record",
+            r#"{ name = "alice", age = 30 }"#,
+            serde_json::json!({"age": 30, "name": "alice"}),
+        ),
+        (
+            "nested_record",
+            r#"{ outer = { inner = 42 } }"#,
+            serde_json::json!({"outer": {"inner": 42}}),
+        ),
+        // Complex: let bindings, functions applied
+        (
+            "let_binding",
+            r#"let x = 10 in { value = x * 2 }"#,
+            serde_json::json!({"value": 20}),
+        ),
+        (
+            "array_map",
+            r#"std.array.map (fun x => x + 1) [1, 2, 3]"#,
+            Value::Array(vec![
+                Value::Number(Number::from(2)),
+                Value::Number(Number::from(3)),
+                Value::Number(Number::from(4)),
+            ]),
+        ),
+        // Realistic config (use different name to avoid recursive field shadowing)
+        (
+            "config",
+            r#"
+            let server_port = 8080 in
+            {
+              server = {
+                host = "0.0.0.0",
+                port = server_port,
+                debug = false,
+              },
+              database = {
+                url = "postgres://localhost/mydb",
+                pool_size = 5,
+              },
+            }
+            "#,
+            serde_json::json!({
+                "server": {
+                    "host": "0.0.0.0",
+                    "port": 8080,
+                    "debug": false
+                },
+                "database": {
+                    "url": "postgres://localhost/mydb",
+                    "pool_size": 5
+                }
+            }),
+        ),
+    ]
+}
+
+fn cmd_nickel() {
+    let cases = nickel_test_cases();
+    let mut pass = 0;
+    let mut fail = 0;
+
+    for (name, source, expected) in &cases {
+        match eval_nickel(source) {
+            Ok(json_str) => {
+                match serde_json::from_str::<Value>(&json_str) {
+                    Ok(actual) => {
+                        if &actual == expected {
+                            pass += 1;
+                            println!("  PASS {name}");
+                        } else {
+                            fail += 1;
+                            eprintln!("  FAIL {name}: value mismatch");
+                            eprintln!("    expected: {expected}");
+                            eprintln!("    actual:   {actual}");
+                        }
+                    }
+                    Err(e) => {
+                        fail += 1;
+                        eprintln!("  FAIL {name}: JSON parse error: {e}");
+                        eprintln!("    json_str: {json_str}");
+                    }
+                }
+            }
+            Err(e) => {
+                fail += 1;
+                eprintln!("  FAIL {name}: {e}");
+            }
+        }
+    }
+
+    println!("\nNickel conformance: {pass} passed, {fail} failed out of {} tests", cases.len());
+    if fail > 0 {
+        std::process::exit(1);
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("roundtrip");
@@ -205,8 +409,9 @@ fn main() {
         }
         "roundtrip" => cmd_roundtrip(),
         "escaping" => cmd_escaping(),
+        "nickel" => cmd_nickel(),
         _ => {
-            eprintln!("Usage: nickelean-conformance <generate|roundtrip|escaping>");
+            eprintln!("Usage: nickelean-conformance <generate|roundtrip|escaping|nickel>");
             std::process::exit(1);
         }
     }
