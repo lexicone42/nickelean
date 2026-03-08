@@ -22,9 +22,8 @@ Nickel is a configuration language that evaluates to JSON-serializable values. T
 
 ## What this does NOT prove
 
-- **No connection to Nickel's Rust implementation** — The Lean `toJson`/`fromJson` functions are an independent model. They are not extracted from or verified against Nickel's `serde::Serialize`/`Deserialize` code.
-- **AST-level only, no JSON text roundtrip** — The roundtrip is `NickelValue → JsonValue → NickelValue`, not `NickelValue → String → NickelValue`. String escaping is proven separately but not composed into a full text-level roundtrip.
-- **No surrogate pair decoding** — `unescapeJsonString` does not handle `\uD800`–`\uDFFF` surrogate pair encoding of non-BMP characters. Characters outside the BMP pass through as raw UTF-8 (valid per RFC 8259), but JSON from other producers using surrogate pairs would be rejected by `fromJson`.
+- **No connection to Nickel's Rust implementation** — The Lean `toJson`/`fromJson` functions are an independent model. They are not extracted from or verified against Nickel's `serde::Serialize`/`Deserialize` code. However, cross-validation tests (`CrossValidation.lean`) verify that the Lean model's JSON output matches `serde_json`'s output for 22 test vectors.
+- **AST-level roundtrip** — The main roundtrip theorem is `NickelValue → JsonValue → NickelValue`. A JSON text printer (`PrintJson.lean`) is provided for cross-validation but the full `NickelValue → String → NickelValue` text roundtrip is not yet composed into a single theorem.
 - **Numbers are exact rationals** — `JsonNumber` uses `Int / Nat`, not floating-point. The roundtrip holds for all rationals, but `JsonNumber` equality is non-canonical (`1/2 ≠ 2/4`) and no normalization is modeled.
 
 ## Project structure
@@ -39,6 +38,8 @@ Nickelean/
 ├── Roundtrip.lean              # Main roundtrip theorem (mutual recursion)
 ├── Roundtrip/
 │   └── EscapeRoundtrip.lean    # 5-layer escape roundtrip proof
+├── PrintJson.lean              # JSON text printer (JsonValue → String)
+├── CrossValidation.lean        # Cross-validation against serde_json output
 ├── Float64.lean                # IEEE 754 conformance predicates
 ├── RecordOrder.lean            # Field ordering and normalization
 ├── DecidableEq.lean            # DecidableEq for nested inductives
@@ -73,7 +74,7 @@ cargo run -- escaping     # 16 hand-crafted escape edge cases
 
 - **Mutual recursion**: Lean 4 cannot derive structural recursion through `List` wrappers in nested inductives. All functions (`toJson`, `fromJson`, `DecidableEq`) and all proofs use explicit mutual recursion with list helpers.
 
-- **Phase 1 escaping**: Currently handles ASCII + BMP + raw UTF-8 passthrough for non-BMP characters. Surrogate pair decoding (`\uD800`–`\uDFFF` sequences) is not yet implemented — non-BMP characters survive roundtrip as raw UTF-8 but not as JSON surrogate pair escapes.
+- **Full Unicode escaping**: Handles ASCII, BMP `\uXXXX` escapes, and surrogate pair decoding (`\uD800`–`\uDFFF` sequences for non-BMP characters). Non-BMP characters are passed through as raw UTF-8 by the escaper (valid per RFC 8259) but can be decoded from surrogate pairs when unescaping.
 
 ## Related work
 

@@ -5,7 +5,7 @@
 
   Proof layers:
   1. hexDigit/parseHexDigit roundtrip (finite cases + native_decide)
-  2. parseHex4 roundtrip for \uXXXX encoding
+  2. parseHex4Nat roundtrip for \uXXXX encoding
   3. Single-char: unescapeLoop (escapeChar c ++ rest) acc = unescapeLoop rest (c :: acc)
   4. Full string by list induction
   5. Main theorem lifted to String
@@ -26,6 +26,22 @@ theorem hex4_decompose (n : Nat) (h : n < 65536) :
     (n / 4096 % 16) * 4096 + (n / 256 % 16) * 256 + (n / 16 % 16) * 16 + n % 16 = n := by
   omega
 
+theorem parseHex4Nat_roundtrip (n : Nat) (hlt : n < 65536) :
+    parseHex4Nat
+      (hexDigit (n / 4096 % 16))
+      (hexDigit (n / 256 % 16))
+      (hexDigit (n / 16 % 16))
+      (hexDigit (n % 16))
+    = some n := by
+  simp only [parseHex4Nat]
+  rw [parseHexDigit_hexDigit _ (by omega)]
+  rw [parseHexDigit_hexDigit _ (by omega)]
+  rw [parseHexDigit_hexDigit _ (by omega)]
+  rw [parseHexDigit_hexDigit _ (by omega)]
+  simp only [bind, Option.bind, pure]
+  congr 1
+  exact hex4_decompose n hlt
+
 theorem parseHex4_roundtrip (c : Char) (hlt : c.val.toNat < 65536) :
     parseHex4
       (hexDigit (c.val.toNat / 4096 % 16))
@@ -34,22 +50,18 @@ theorem parseHex4_roundtrip (c : Char) (hlt : c.val.toNat < 65536) :
       (hexDigit (c.val.toNat % 16))
     = some c := by
   simp only [parseHex4]
-  rw [parseHexDigit_hexDigit _ (by omega)]
-  rw [parseHexDigit_hexDigit _ (by omega)]
-  rw [parseHexDigit_hexDigit _ (by omega)]
-  rw [parseHexDigit_hexDigit _ (by omega)]
+  rw [parseHex4Nat_roundtrip _ hlt]
   simp only [bind, Option.bind]
-  have heq := hex4_decompose c.val.toNat hlt
-  have hvalid : Nat.isValidChar (c.val.toNat / 4096 % 16 * 4096 + c.val.toNat / 256 % 16 * 256 +
-    c.val.toNat / 16 % 16 * 16 + c.val.toNat % 16) := by
-    rw [heq]; exact c.valid
-  simp only [hvalid, ↓reduceDIte]
-  congr 1
-  apply Char.ext
-  apply UInt32.toNat_inj.mp
-  exact heq
+  have hvalid : Nat.isValidChar c.val.toNat := c.valid
+  simp only [hvalid, ↓reduceDIte, Option.some.injEq]
+  exact Char.ext (UInt32.toNat_inj.mp rfl)
 
 /-! ## Layer 3: Single character roundtrip -/
+
+/-- Characters < 0x20 are never surrogates (surrogates start at 0xD800). -/
+private theorem not_surrogate_of_lt_0x20 (n : Nat) (h : n < 0x20) :
+    isHighSurrogate n = false ∧ isLowSurrogate n = false := by
+  constructor <;> simp [isHighSurrogate, isLowSurrogate] <;> omega
 
 /-- When escapeChar produces a \uXXXX sequence and unescapeLoop processes it,
     the original character is recovered. -/
@@ -64,8 +76,17 @@ private theorem unescapeLoop_escapeCharHex (c : Char) (hlt : c.val < 0x20)
     have h32 := UInt32.lt_iff_toNat_lt.mp hlt
     simp (config := { decide := true }) at h32
     omega
-  rw [parseHex4_roundtrip c hlt']
-  simp [bind, Option.bind]
+  -- parseHex4Nat succeeds for control characters
+  rw [parseHex4Nat_roundtrip c.val.toNat hlt']
+  simp only [bind, Option.bind]
+  -- Control chars < 0x20 are never surrogates
+  have ⟨hns_hi, hns_lo⟩ := not_surrogate_of_lt_0x20 c.val.toNat (by
+    have h32 := UInt32.lt_iff_toNat_lt.mp hlt
+    simp (config := { decide := true }) at h32
+    omega)
+  simp only [hns_hi, hns_lo, Bool.false_eq_true, ↓reduceIte, c.valid, ↓reduceDIte,
+    List.nil_append]
+  congr 1
 
 /-- The core inversion lemma: unescapeLoop correctly inverts one escaped
     character and continues with the rest of the input. -/

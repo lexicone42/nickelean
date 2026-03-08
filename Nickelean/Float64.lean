@@ -34,8 +34,8 @@ def f64MantissaBits : Nat := 53
 
 /-! ## F64 Representability -/
 
-/-- A rational number p/q is f64-representable if it can be expressed as
-    m * 2^e where |m| < 2^53 and -1074 ≤ e ≤ 971.
+/-- A rational number p/q is f64-representable if it equals m * 2^e
+    where |m| < 2^53 and -1074 ≤ e ≤ 971.
 
     This covers all finite IEEE 754 double-precision values including
     subnormals, normals, and zero. -/
@@ -43,7 +43,7 @@ def IsF64Representable (n : JsonNumber) : Prop :=
   ∃ (m : Int) (e : Int),
     -1074 ≤ e ∧ e ≤ 971 ∧
     m.natAbs < 2^53 ∧
-    n.numerator * (n.denominator : Int) = m * 2^e.toNat * (n.denominator : Int)
+    n.numerator = m * 2^e.toNat * (n.denominator : Int)
 
 /-- Zero is f64-representable. -/
 theorem isF64Representable_zero : IsF64Representable ⟨0, 1, by omega⟩ :=

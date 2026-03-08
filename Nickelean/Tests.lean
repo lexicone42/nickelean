@@ -124,6 +124,29 @@ def mkNum (n : Int) (d : Nat) (h : d > 0 := by omega) : JsonNumber :=
   assert! fromJson (toJson buildConfig) == some buildConfig
   IO.println "complex nested: OK"
 
+/-! ## Surrogate pair decoding -/
+
+#eval do
+  -- U+1F600 (😀) encoded as surrogate pair \uD83D\uDE00
+  let input := "\\uD83D\\uDE00".toList
+  match unescapeLoop input [] with
+  | some chars =>
+    assert! chars.length == 1
+    assert! chars.head!.val.toNat == 0x1F600
+  | none => panic! "surrogate pair decode failed"
+  -- Lone high surrogate should fail
+  assert! unescapeLoop "\\uD83D".toList [] == none
+  -- Lone low surrogate should fail
+  assert! unescapeLoop "\\uDE00".toList [] == none
+  -- Surrogate pair in context
+  let input2 := "hi\\uD83D\\uDE00bye".toList
+  match unescapeLoop input2 [] with
+  | some chars =>
+    let s := String.ofList chars
+    assert! s.length == 6  -- h, i, 😀, b, y, e
+  | none => panic! "surrogate pair in context failed"
+  IO.println "surrogate pairs: OK"
+
 /-! ## All tests summary -/
 
 #eval IO.println "All conformance tests passed."
