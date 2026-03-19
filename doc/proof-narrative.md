@@ -181,12 +181,60 @@ JSON objects are unordered per RFC 8259, but implementations differ:
 
 The `RecordOrder.lean` module provides `normalizeFieldOrder` (recursive field sorting) and proves `json_roundtrip_normalized` — the roundtrip holds for normalized values. Full permutation equivalence is documented but deferred.
 
+## JSON text roundtrip (Gap 3 closure)
+
+The most substantial addition: a JSON text parser (`ParseJsonText.lean`, 699 lines) with a proven roundtrip against `printJsonValue`.
+
+The parser handles null, true, false, integers (with optional minus), quoted strings with escape sequences, arrays with comma-separated elements, and objects with "key":value pairs. It uses fuel-based termination.
+
+**Proof architecture (bottom-up)**:
+
+1. **ScanSafe predicate** — Captures strings where `scanStringContent` correctly finds the closing quote. Proved that `escapeJsonString` produces `ScanSafe` output.
+
+2. **scanStringContent roundtrip** — Scanning a ScanSafe char list followed by `'"'` recovers the original chars.
+
+3. **Number parsing** — `parseJsonNat` inverts `printNat` via accumulator induction. The key lemma: `printNatGo n []` produces digit characters whose foldl computes back to `n`.
+
+4. **First-char disambiguation** — `printJsonValue v` never starts with `']'` or `'}'`, needed to distinguish array/object content from closing brackets.
+
+5. **Mutual roundtrip** — Three theorems by structural induction: `parseJV_printJsonValue`, `parseJArr_printJsonArray`, `parseJObj_printJsonObject`.
+
+## serde_json spec and float composition
+
+`SerdeSpec.lean` formalizes serde_json's serialization:
+- `SerdeNumber` type (PosInt/NegInt/Float, matching serde_json::Number)
+- `classifyNumber` (Nickel's serialize_num dispatch)
+- `serdeJsonSerialize` (compact JSON formatter)
+- Proven: integer formatting matches our `printJsonNumber`
+
+`SerdeFloat.lean` connects to ryu-lean4:
+- `ryuFloatFormat` instantiates `FloatFormat` with F64, Decimal, Ryu
+- `serialize_num_float_roundtrip`: the composition theorem
+- `serialize_num_complete`: any JsonNumber either has an integer string or a float string that roundtrips
+
+## The capstone
+
+`FullTextRoundtrip.lean` (120 lines) composes everything:
+
+```lean
+theorem full_text_roundtrip (v : NickelValue) (hdo : NickelAllDenOne v) :
+    (parseJV ((printJsonValue (toJson v)).toList) (jsonSize (toJson v))).bind
+      (fun ⟨jv, _⟩ => fromJson jv) = some v
+```
+
+The proof is 4 lines — all complexity is in the components.
+
 ## Proof statistics
 
 | Component | Lines | Technique |
 |-----------|-------|-----------|
-| Escape roundtrip | 126 | 5-layer pyramid, native_decide for base cases |
-| Main roundtrip | 65 | Mutual structural induction |
-| DecidableEq | 159 | Exhaustive constructor case analysis |
-| String escaping | 87 | State machine + accumulator |
-| Total formalization | ~700 | All constructive, no axioms |
+| JSON text parser + roundtrip proof | 699 | Fuel-based recursion, mutual induction |
+| serde_json spec + float composition | 319 | Ryu integration, number classification |
+| Escape implementation + roundtrip | 283 | 5-layer pyramid, native_decide base cases |
+| DecidableEq instances | 159 | Exhaustive constructor case analysis |
+| Full text roundtrip composition | 120 | Precondition satisfaction + 4-line proof |
+| AST roundtrip + cross-validation | 216 | Mutual structural induction, 33 tests |
+| Core types + utilities | 462 | Dependent types, mutual recursion |
+| **Total Lean formalization** | **~2,260** | **Zero sorrys, zero axioms** |
+| **+ ryu-lean4** | **~3,230** | **IEEE 754 float-to-string roundtrip** |
+| **Combined system** | **~5,490** | **Full verified JSON serialization** |
