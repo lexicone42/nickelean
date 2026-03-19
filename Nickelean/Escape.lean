@@ -39,6 +39,8 @@ def escapeChar (c : Char) : List Char :=
   else if c == '\n' then ['\\', 'n']
   else if c == '\r' then ['\\', 'r']
   else if c == '\t' then ['\\', 't']
+  else if c == Char.ofNat 8 then ['\\', 'b']    -- backspace, matching serde_json
+  else if c == Char.ofNat 12 then ['\\', 'f']   -- formfeed, matching serde_json
   else if c.val < 0x20 then escapeCharHex c
   else [c]
 

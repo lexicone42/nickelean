@@ -53,11 +53,11 @@ private def jn (n : Int) : JsonNumber := ⟨n, 1, by omega⟩
   crossCheck "string_newline" (.str "a\nb") "\"a\\nb\""
   crossCheck "string_tab" (.str "a\tb") "\"a\\tb\""
   crossCheck "string_cr" (.str "a\rb") "\"a\\rb\""
-  -- Control characters: serde_json uses \uXXXX for 0x00-0x1F except \n\r\t
+  -- Control characters: serde_json uses \uXXXX for 0x00-0x1F except \b\t\n\f\r
   crossCheck "string_null" (.str (String.ofList [Char.ofNat 0])) "\"\\u0000\""
   crossCheck "string_bell" (.str (String.ofList [Char.ofNat 7])) "\"\\u0007\""
-  crossCheck "string_bs" (.str (String.ofList [Char.ofNat 8])) "\"\\u0008\""
-  crossCheck "string_ff" (.str (String.ofList [Char.ofNat 12])) "\"\\u000c\""
+  crossCheck "string_bs" (.str (String.ofList [Char.ofNat 8])) "\"\\b\""
+  crossCheck "string_ff" (.str (String.ofList [Char.ofNat 12])) "\"\\f\""
 
   -- Arrays
   crossCheck "empty_array" (.array []) "[]"

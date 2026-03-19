@@ -63,11 +63,20 @@ private theorem not_surrogate_of_lt_0x20 (n : Nat) (h : n < 0x20) :
     isHighSurrogate n = false ∧ isLowSurrogate n = false := by
   constructor <;> simp [isHighSurrogate, isLowSurrogate] <;> omega
 
+/-- escapeChar maps backspace to \b (matching serde_json). -/
+private theorem escapeChar_backspace : escapeChar (Char.ofNat 8) = ['\\', 'b'] := by
+  native_decide
+
+/-- escapeChar maps formfeed to \f (matching serde_json). -/
+private theorem escapeChar_formfeed : escapeChar (Char.ofNat 12) = ['\\', 'f'] := by
+  native_decide
+
 /-- When escapeChar produces a \uXXXX sequence and unescapeLoop processes it,
     the original character is recovered. -/
 private theorem unescapeLoop_escapeCharHex (c : Char) (hlt : c.val < 0x20)
     (_hne_n : c ≠ '\n') (_hne_r : c ≠ '\r') (_hne_t : c ≠ '\t')
     (_hne_q : c ≠ '"') (_hne_b : c ≠ '\\')
+    (_hne_bs : c ≠ Char.ofNat 8) (_hne_ff : c ≠ Char.ofNat 12)
     (rest : List Char) (acc : List Char) :
     unescapeLoop (escapeCharHex c ++ rest) acc = unescapeLoop rest (c :: acc) := by
   simp only [escapeCharHex, List.cons_append]
@@ -102,18 +111,22 @@ theorem unescapeLoop_escapeChar (c : Char) (rest : List Char) (acc : List Char) 
         · subst hr; simp [escapeChar]; rw [unescapeLoop.eq_6]
         · by_cases ht : c = '\t'
           · subst ht; simp [escapeChar]; rw [unescapeLoop.eq_7]
-          · by_cases hctl : c.val < 0x20
-            · -- Control character: uses \uXXXX encoding
-              have : escapeChar c = escapeCharHex c := by
-                simp [escapeChar, hq, hb, hn, hr, ht, hctl]
-              rw [this]
-              exact unescapeLoop_escapeCharHex c hctl hn hr ht hq hb rest acc
-            · -- Passthrough: character is not special
-              have : escapeChar c = [c] := by
-                simp [escapeChar, hq, hb, hn, hr, ht, hctl]
-              rw [this, List.singleton_append]
-              rw [unescapeLoop.eq_12]
-              all_goals (try intros; simp_all)
+          · by_cases hbs : c = Char.ofNat 8
+            · subst hbs; simp [escapeChar_backspace]; rw [unescapeLoop.eq_8]
+            · by_cases hff : c = Char.ofNat 12
+              · subst hff; simp [escapeChar_formfeed]; rw [unescapeLoop.eq_9]
+              · by_cases hctl : c.val < 0x20
+                · -- Control character: uses \uXXXX encoding
+                  have : escapeChar c = escapeCharHex c := by
+                    simp [escapeChar, hq, hb, hn, hr, ht, hbs, hff, hctl]
+                  rw [this]
+                  exact unescapeLoop_escapeCharHex c hctl hn hr ht hq hb hbs hff rest acc
+                · -- Passthrough: character is not special
+                  have : escapeChar c = [c] := by
+                    simp [escapeChar, hq, hb, hn, hr, ht, hbs, hff, hctl]
+                  rw [this, List.singleton_append]
+                  rw [unescapeLoop.eq_12]
+                  all_goals (try intros; simp_all)
 
 /-! ## Layer 4: Full list roundtrip via accumulator -/
 
