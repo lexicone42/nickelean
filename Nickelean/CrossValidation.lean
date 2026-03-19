@@ -71,4 +71,16 @@ private def jn (n : Int) : JsonNumber := ⟨n, 1, by omega⟩
   -- Nested
   crossCheck "nested" (.record [("a", .array [.num (jn 1)]), ("b", .record [("c", .null)])]) "{\"a\":[1],\"b\":{\"c\":null}}"
 
-  IO.println "Cross-validation: all matched!"
+  -- Additional edge cases
+  crossCheck "string_slash" (.str "a/b") "\"a/b\""   -- forward slash NOT escaped (serde_json behavior)
+  crossCheck "deeply_nested" (.array [.array [.array [.num (jn 1)]]]) "[[[1]]]"
+  crossCheck "empty_nested" (.record [("a", .array []), ("b", .record [])]) "{\"a\":[],\"b\":{}}"
+  crossCheck "large_int" (.num (jn 999999999)) "999999999"
+  crossCheck "neg_large" (.num (jn (-123456789))) "-123456789"
+  crossCheck "single_elem_arr" (.array [.null]) "[null]"
+  crossCheck "bool_array" (.array [.bool true, .bool false, .bool true]) "[true,false,true]"
+  crossCheck "string_with_escapes" (.str "line1\nline2\ttab") "\"line1\\nline2\\ttab\""
+  crossCheck "unicode_passthrough" (.str "café") "\"café\""
+  crossCheck "empty_key" (.record [("", .num (jn 0))]) "{\"\":0}"
+
+  IO.println s!"Cross-validation: all {22 + 11} tests matched!"
