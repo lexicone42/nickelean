@@ -14,13 +14,13 @@ import Nickelean.JsonValue
 /-! ## Number printing -/
 
 /-- Print a non-negative integer as a decimal string. -/
-private def printNatGo : Nat → List Char → List Char
+def printNatGo : Nat → List Char → List Char
   | 0, acc => acc
   | n + 1, acc => printNatGo ((n + 1) / 10) (Char.ofNat (0x30 + (n + 1) % 10) :: acc)
 termination_by n => n
 decreasing_by omega
 
-private def printNat : Nat → String
+def printNat : Nat → String
   | 0 => "0"
   | n => String.ofList (printNatGo n [])
 
