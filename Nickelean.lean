@@ -15,3 +15,4 @@ import Nickelean.CrossValidation
 import Nickelean.SerdeSpec
 import Nickelean.SerdeFloat
 import Nickelean.ParseJsonText
+import Nickelean.FullTextRoundtrip
