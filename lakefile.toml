@@ -2,6 +2,16 @@ name = "nickelean"
 version = "0.1.0"
 defaultTargets = ["nickelean"]
 
+[[require]]
+name = "RyuLean4"
+git = "https://github.com/lexicone42/ryu-lean4"
+rev = "ddd2ccd"
+
+[[require]]
+name = "mathlib"
+git = "https://github.com/leanprover-community/mathlib4"
+tag = "v4.28.0"
+
 [[lean_lib]]
 name = "Nickelean"
 

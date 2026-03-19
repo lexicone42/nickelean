@@ -13,3 +13,4 @@ import Nickelean.DecidableEq
 import Nickelean.PrintJson
 import Nickelean.CrossValidation
 import Nickelean.SerdeSpec
+import Nickelean.SerdeFloat
