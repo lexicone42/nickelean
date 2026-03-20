@@ -125,10 +125,20 @@ The Lean model is independently written, not extracted from Nickel's Rust code. 
 - **33 cross-validation tests**: Compile-time verification against serde_json output
 - **Rust differential testing**: 1000+ random roundtrip tests via the conformance suite
 
+**Unified number roundtrip** — A single theorem covering both integer and float numbers:
+
+```lean
+theorem number_serde_roundtrip_unified (jn : JsonNumber)
+    (hfin : F64.isFinite (F64.roundToNearestEven jn.toMathRat))
+    (rest : List Char) (hrest : NonNumContHead rest) :
+    ∃ jn', parseJsonNumber ((formatSerdeNumberF64 (classifyNumberF64 jn hfin)).toList ++ rest)
+      = some (jn', rest) ∧
+    (jn.denominator = 1 → jn' = jn) ∧
+    F64.roundToNearestEven jn'.toMathRat = F64.roundToNearestEven jn.toMathRat
+```
+
 ### Known limitations
 
-- **Two roundtrip theorems, not one** — Integer numbers have a complete end-to-end text roundtrip (`full_text_roundtrip`). Float numbers have a complete roundtrip through our JSON parser (`float_text_roundtrip_f64`). These are proven separately; there is no single unified theorem handling a NickelValue tree with mixed integer and float numbers. Composing them for a mixed tree requires applying each theorem to the appropriate numbers.
-- **`json_roundtrip_sorted` is existential** — `toJsonSorted` (matching Nickel's alphabetical field ordering) is proven to always deserialize successfully (`∃ v', fromJson(toJsonSorted v) = some v'`), but the exact relationship between the output `v'` and the input `v` (which differ by field reordering) is not characterized.
 - **Numbers are exact rationals** — `JsonNumber` uses `Int / Nat`, not floating-point. Non-canonical equality (`1/2 ≠ 2/4`) by design.
 - **serde_json version** — Spec targets v1.0.140 (uses ryu for floats). Nickel could upgrade to v1.0.147+ (uses zmij), which would require parser updates for `e+` notation.
 
