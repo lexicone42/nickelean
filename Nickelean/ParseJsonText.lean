@@ -55,21 +55,24 @@ def decimalToJsonNumber (sign : Bool) (digits : Nat) (exponent : Int) : JsonNumb
   else
     ⟨signedDigits, 10 ^ (-exponent).toNat, by positivity⟩
 
-/-- After parsing initial digits `n` from a number, handle the rest:
-    - If 'e' follows: scientific notation without fraction
-    - If '.' follows: scientific notation with fraction
-    - Otherwise: plain integer -/
+/-- Skip an optional '+' after 'e' in scientific notation.
+    zmij (serde_json ≥ 1.0.147) uses 'e+' for positive exponents;
+    ryu (serde_json < 1.0.147) uses 'e'. Both are valid JSON. -/
+def skipOptionalPlus : List Char → List Char
+  | '+' :: rest => rest
+  | rest => rest
+
 def parseJsonNumberTail (sign : Bool) (n : Nat) (rest : List Char) : Option (JsonNumber × List Char) :=
   match rest with
   | 'e' :: expRest =>
-    match Decimal.parseInt expRest with
+    match Decimal.parseInt (skipOptionalPlus expRest) with
     | some (exp, rest') => some (decimalToJsonNumber sign n exp, rest')
     | none => none
   | '.' :: fracRest =>
     match Decimal.parseNat fracRest with
     | some (frac, 'e' :: expRest) =>
-      let numFrac := fracRest.length - expRest.length - 1
-      match Decimal.parseInt expRest with
+      let numFrac := fracRest.length - expRest.length - 1  -- chars between '.' and 'e'
+      match Decimal.parseInt (skipOptionalPlus expRest) with
       | some (exp, rest') =>
         let fullDigits := n * 10 ^ numFrac + frac
         let fullExp := exp - (numFrac : Int)

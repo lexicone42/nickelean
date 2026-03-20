@@ -194,4 +194,10 @@ private def checkJson (label : String) (input : String) (expected : JsonValue) :
     "{\"a\":{\"b\":3.14e2}}"
     (.object [("a", .object [("b", .number ⟨314, 1, by omega⟩)])])  -- 3.14e2 = 314
 
-  IO.println s!"Decimal notation: all 18 tests passed!"
+  -- 5. zmij-style e+ notation (serde_json >= 1.0.147)
+  checkNum "1e+0" "1e+0" 1 1
+  checkNum "1e+2" "1e+2" 100 1
+  checkNum "1.5e+1" "1.5e+1" 15 1
+  checkNum "-3e+0" "-3e+0" (-3) 1
+
+  IO.println s!"Decimal notation: all 22 tests passed!"

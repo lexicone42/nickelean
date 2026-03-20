@@ -24,12 +24,43 @@ theorem nonDigitHead_to_parseDigitChar (rest : List Char) (h : NonDigitHead rest
       · next h => exact absurd h hnd
       · rfl⟩
 
+open Decimal in
+/-- intToDigits output appended with rest never starts with '+'. -/
+private theorem intToDigits_not_plus (exp : Int) (rest : List Char) :
+    skipOptionalPlus (intToDigits exp ++ rest) = intToDigits exp ++ rest := by
+  cases exp with
+  | ofNat n =>
+    simp only [intToDigits]
+    cases n with
+    | zero =>
+      -- natToDigits 0 = ['0'], '0' ≠ '+'
+      simp [natToDigits, skipOptionalPlus]
+    | succ n =>
+      have hne := natToDigits_ne_nil (n + 1)
+      obtain ⟨c, cs, hcs⟩ := List.exists_cons_of_ne_nil hne
+      rw [hcs, List.cons_append]
+      -- c is a member of natToDigits (n+1)
+      have hc_mem : c ∈ natToDigits (n + 1) := by rw [hcs]; simp
+      -- For n+1 > 0, natToDigits = natToDigitsAux
+      have hc_aux : c ∈ natToDigitsAux (n + 1) [] := by
+        simp only [natToDigits, show ¬(n + 1 = 0) from by omega, ↓reduceIte] at hc_mem
+        exact hc_mem
+      obtain ⟨d, hd, rfl⟩ := natToDigitsAux_mem (n + 1) c hc_aux
+      -- Char.ofNat (d + 48) for d < 10: enumerate to show ≠ '+'
+      have hne_plus : Char.ofNat (d + 48) ≠ '+' := by
+        have : d = 0 ∨ d = 1 ∨ d = 2 ∨ d = 3 ∨ d = 4 ∨
+               d = 5 ∨ d = 6 ∨ d = 7 ∨ d = 8 ∨ d = 9 := by omega
+        rcases this with rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl <;> native_decide
+      simp [skipOptionalPlus, hne_plus]
+  | negSucc n =>
+    simp [intToDigits, List.cons_append, skipOptionalPlus]
+
 /-- parseJsonNumberTail handles the 'e' case correctly. -/
 theorem parseJsonNumberTail_e (sign : Bool) (n : Nat) (exp : Int) (rest : List Char)
     (hrest : NonDigitHead rest) :
     parseJsonNumberTail sign n ('e' :: (Decimal.intToDigits exp ++ rest)) =
       some (decimalToJsonNumber sign n exp, rest) := by
-  simp only [parseJsonNumberTail]
+  simp only [parseJsonNumberTail, intToDigits_not_plus]
   rw [Decimal.parseInt_intToDigits_append exp rest (nonDigitHead_to_parseDigitChar rest hrest)]
 
 /-- parseJsonNumber on unsigned input. -/
@@ -195,7 +226,7 @@ theorem parseJsonNumber_decimalFormat (d : Decimal) (hd : d.WellFormed) (rest : 
             (match Decimal.parseNat (tail ++ eRest) with
             | some (frac, 'e' :: expRest) =>
               let numFrac := (tail ++ eRest).length - expRest.length - 1
-              match Decimal.parseInt expRest with
+              match Decimal.parseInt (skipOptionalPlus expRest) with
               | some (exp, rest') =>
                 let fullDigits := d1 * 10 ^ numFrac + frac
                 let fullExp := exp - (numFrac : Int)
@@ -205,6 +236,7 @@ theorem parseJsonNumber_decimalFormat (d : Decimal) (hd : d.WellFormed) (rest : 
         rw [this, hpn_tail, show eRest = 'e' :: (eDigits ++ rest) from rfl]
         simp only []
         rw [show eDigits ++ rest = Decimal.intToDigits adjExp ++ rest from rfl,
+            intToDigits_not_plus adjExp rest,
             Decimal.parseInt_intToDigits_append adjExp rest hrest_pdc]
         simp only [hlen_calc, hdigits_eq]
         -- Reduce the match some (adjExp, rest) with ...
