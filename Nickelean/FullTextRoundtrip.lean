@@ -263,6 +263,33 @@ theorem formatSerdeNumberF64_text_roundtrip (jn : JsonNumber) (h : jn.denominato
   ⟨formatSerdeNumberF64_int_roundtrip jn h hfin rest hrest,
    classifyNumberF64_int_eq jn h hfin⟩
 
+/-! ## The explicit F64 roundtrip through our JSON parser (Concern D) -/
+
+/-- THE EXPLICIT F64 ROUNDTRIP THROUGH OUR PARSER.
+    For any finite F64 x, parsing its Ryu-formatted output with our JSON parser
+    produces a JsonNumber that, when rounded back to F64, gives x.
+
+    This is the missing link that the adversarial review identified:
+      F64 → Ryu → Decimal.format → parseJsonNumber → JsonNumber → F64.roundToNearestEven → F64
+    The first and last F64 are the same. -/
+theorem float_text_roundtrip_f64 (x : F64) (hfin : F64.isFinite x)
+    (rest : List Char) (hrest : NonNumContHead rest)
+    (hne : (Ryu.ryu x hfin).digits ≠ 0) :
+    let d := Ryu.ryu x hfin
+    let jn := decimalToJsonNumber d.sign d.digits d.exponent
+    parseJsonNumber ((Decimal.format d).toList ++ rest) = some (jn, rest) ∧
+    F64.roundToNearestEven jn.toMathRat = x := by
+  constructor
+  · exact parseJsonNumber_ryu x hfin rest hrest
+  · -- jn.toMathRat = d.toRat (by decimalToJsonNumber_toMathRat)
+    -- Decimal.toF64 d = F64.roundToNearestEven(d.toRat) (by definition, since digits ≠ 0)
+    -- Decimal.toF64(Ryu.ryu x hfin) = x (by ryu_roundtrip)
+    rw [decimalToJsonNumber_toMathRat]
+    have h_toF64 : Decimal.toF64 (Ryu.ryu x hfin) = F64.roundToNearestEven (Decimal.toRat (Ryu.ryu x hfin)) := by
+      simp [Decimal.toF64, hne]
+    rw [← h_toF64]
+    exact Ryu.ryu_roundtrip x hfin
+
 /-! ## Smoke tests: Decimal format parsing -/
 
 -- Verify parseJsonNumber handles Decimal.format output
