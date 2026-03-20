@@ -19,6 +19,7 @@ import Nickelean.Roundtrip.EscapeRoundtrip
 import RyuLean4.Decimal.Decimal
 import RyuLean4.Decimal.Format
 import RyuLean4.Decimal.Parse
+import RyuLean4.Roundtrip.FormatParse
 
 /-! ## Number parsing -/
 

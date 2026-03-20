@@ -17,6 +17,7 @@
   4. fromJson: JsonValue → NickelValue  (unescapes, recovers values)
 -/
 import Nickelean.ParseJsonText
+import Nickelean.DecimalParseRoundtrip
 import Nickelean.Roundtrip
 import Nickelean.SerdeFloat
 import RyuLean4.Roundtrip.FormatParse
@@ -125,6 +126,31 @@ theorem full_text_roundtrip (v : NickelValue) (hdo : NickelAllDenOne v) :
   rw [text_roundtrip_json v hdo]
   simp [Option.bind]
   exact json_roundtrip v
+
+/-! ## Float number roundtrip (Decimal.format → parseJsonNumber)
+
+  For finite F64 values, the Ryu-formatted decimal string is correctly
+  parsed by our JSON number parser, producing a JsonNumber consistent
+  with the original Decimal.
+
+  This composes:
+  1. Ryu.ryu: F64 → Decimal (shortest representation)
+  2. Decimal.format: Decimal → String
+  3. parseJsonNumber: String → JsonNumber (our parser)
+  4. decimalToJsonNumber: relates the parsed JsonNumber to the Decimal
+
+  Combined with ryu_roundtrip (Decimal.toF64(Ryu.ryu(x)) = x), this
+  gives the complete float roundtrip through our JSON parser.
+-/
+
+/-- For a finite F64, parsing Ryu's formatted output with our JSON parser
+    produces the correct JsonNumber. -/
+theorem parseJsonNumber_ryu (x : F64) (hfin : F64.isFinite x)
+    (rest : List Char) (hrest : NonNumContHead rest) :
+    let d := Ryu.ryu x hfin
+    parseJsonNumber ((Decimal.format d).toList ++ rest) =
+      some (decimalToJsonNumber d.sign d.digits d.exponent, rest) :=
+  parseJsonNumber_decimalFormat (Ryu.ryu x hfin) (Ryu.ryu_well_formed x hfin) rest hrest
 
 /-! ## Smoke tests: Decimal format parsing -/
 
