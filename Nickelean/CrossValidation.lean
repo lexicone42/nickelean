@@ -12,6 +12,7 @@
 -/
 import Nickelean.ToJson
 import Nickelean.PrintJson
+import Nickelean.ParseJsonText
 
 /-! ## String escaping cross-validation
 
@@ -84,3 +85,113 @@ private def jn (n : Int) : JsonNumber := ⟨n, 1, by omega⟩
   crossCheck "empty_key" (.record [("", .num (jn 0))]) "{\"\":0}"
 
   IO.println s!"Cross-validation: all {22 + 11} tests matched!"
+
+/-! ## Decimal/scientific notation parser tests (Gap 6)
+
+  Verify that `parseJsonText` correctly handles decimal and scientific
+  notation numbers produced by Decimal.format (ryu output format).
+  These cover the formats that appear in float serialization:
+  - `<digit>e<int>`: single digit with exponent
+  - `<digit>.<digits>e<int>`: multi-digit with fraction and exponent
+-/
+
+-- Helper to check parsed number value
+private def checkNum (label : String) (input : String) (expectedNum : Int) (expectedDen : Nat) : IO Unit := do
+  match parseJsonText input with
+  | some (.number jn) =>
+    if jn.numerator == expectedNum && jn.denominator == expectedDen then
+      IO.println s!"  MATCH {label}"
+    else
+      IO.eprintln s!"  MISMATCH {label}"
+      IO.eprintln s!"    got: {jn.numerator}/{jn.denominator}"
+      IO.eprintln s!"    expected: {expectedNum}/{expectedDen}"
+      throw (IO.Error.userError s!"parser test failed: {label}")
+  | some other =>
+    IO.eprintln s!"  WRONG TYPE {label}: got {repr other}"
+    throw (IO.Error.userError s!"parser test failed: {label}")
+  | none =>
+    IO.eprintln s!"  PARSE FAILED {label}: input={input}"
+    throw (IO.Error.userError s!"parser test failed: {label}")
+
+-- Helper to check parsed JSON value structure
+private def checkJson (label : String) (input : String) (expected : JsonValue) : IO Unit := do
+  match parseJsonText input with
+  | some v =>
+    if v == expected then
+      IO.println s!"  MATCH {label}"
+    else
+      IO.eprintln s!"  MISMATCH {label}"
+      IO.eprintln s!"    got: {repr v}"
+      IO.eprintln s!"    expected: {repr expected}"
+      throw (IO.Error.userError s!"parser test failed: {label}")
+  | none =>
+    IO.eprintln s!"  PARSE FAILED {label}: input={input}"
+    throw (IO.Error.userError s!"parser test failed: {label}")
+
+#eval do
+  IO.println "Decimal notation parser tests:"
+
+  -- 1. Simple scientific notation: <digit>e<int>
+  -- 1e0 = 1 × 10^0 = 1/1
+  checkNum "1e0" "1e0" 1 1
+  -- 1e2 = 1 × 10^2 = 100/1
+  checkNum "1e2" "1e2" 100 1
+  -- 5e1 = 5 × 10^1 = 50/1
+  checkNum "5e1" "5e1" 50 1
+  -- 1e-1 = 1/10
+  checkNum "1e-1" "1e-1" 1 10
+  -- 1e-3 = 1/1000
+  checkNum "1e-3" "1e-3" 1 1000
+
+  -- 2. Negative numbers with scientific notation
+  -- -5e1 = -50/1
+  checkNum "-5e1" "-5e1" (-50) 1
+  -- -3e0 = -3/1
+  checkNum "-3e0" "-3e0" (-3) 1
+  -- -1e-2 = -1/100
+  checkNum "-1e-2" "-1e-2" (-1) 100
+
+  -- 3. Multi-digit with fraction: <digit>.<digits>e<int>
+  -- 1.5e1 = 15 × 10^0 = 15/1  (digits=15, exp=1-1=0)
+  checkNum "1.5e1" "1.5e1" 15 1
+  -- 1.5e0 = 15 × 10^(-1) = 15/10
+  checkNum "1.5e0" "1.5e0" 15 10
+  -- 1.5e-1 = 15 × 10^(-2) = 15/100
+  checkNum "1.5e-1" "1.5e-1" 15 100
+  -- 3.14e2 = 314 × 10^0 = 314/1
+  checkNum "3.14e2" "3.14e2" 314 1
+  -- -3.14e2 = -314/1
+  checkNum "-3.14e2" "-3.14e2" (-314) 1
+  -- 2.5e-1 = 25/100
+  checkNum "2.5e-1" "2.5e-1" 25 100
+
+  -- 4. JSON structures containing decimal numbers
+  -- Array with scientific notation numbers
+  checkJson "array_sci"
+    "[1e0,2.5e1]"
+    (.array [
+      .number ⟨1, 1, by omega⟩,       -- 1e0 = 1
+      .number ⟨25, 1, by omega⟩        -- 2.5e1 = 25
+    ])
+
+  -- Object with scientific notation number
+  checkJson "object_sci"
+    "{\"x\":1.5e0}"
+    (.object [("x", .number ⟨15, 10, by omega⟩)])  -- 1.5e0 = 15/10
+
+  -- Mixed array
+  checkJson "mixed_sci"
+    "[1e0,\"hello\",true,-2.5e1]"
+    (.array [
+      .number ⟨1, 1, by omega⟩,        -- 1e0 = 1
+      .string "hello",
+      .bool true,
+      .number ⟨-25, 1, by omega⟩       -- -2.5e1 = -25
+    ])
+
+  -- Nested object with float
+  checkJson "nested_sci"
+    "{\"a\":{\"b\":3.14e2}}"
+    (.object [("a", .object [("b", .number ⟨314, 1, by omega⟩)])])  -- 3.14e2 = 314
+
+  IO.println s!"Decimal notation: all 18 tests passed!"

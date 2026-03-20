@@ -127,6 +127,49 @@ theorem full_text_roundtrip (v : NickelValue) (hdo : NickelAllDenOne v) :
   simp [Option.bind]
   exact json_roundtrip v
 
+/-! ## Bridge theorem: decimalToJsonNumber preserves rational value
+
+  The missing compositional link: `decimalToJsonNumber` produces a
+  JsonNumber whose `toMathRat` equals the Decimal's `toRat`.
+
+  This connects the two representations:
+  - parseJsonNumber(Decimal.format(d)) = some (decimalToJsonNumber d.sign d.digits d.exponent)  [PROVEN]
+  - decimalToJsonNumber.toMathRat = Decimal.toRat d                                              [THIS THEOREM]
+  - Decimal.toF64(d) = F64.roundToNearestEven(d.toRat) for digits ≠ 0                           [FROM ryu-lean4]
+
+  Therefore: for the parsed JsonNumber jn from a Decimal d,
+    F64.roundToNearestEven(jn.toMathRat) = Decimal.toF64(d)
+-/
+
+set_option linter.unusedSimpArgs false in
+/-- `decimalToJsonNumber` preserves the rational value: the JsonNumber's
+    `toMathRat` equals the Decimal's `toRat`. -/
+theorem decimalToJsonNumber_toMathRat (sign : Bool) (digits : Nat) (exp : Int) :
+    (decimalToJsonNumber sign digits exp).toMathRat =
+    Decimal.toRat ⟨sign, digits, exp⟩ := by
+  simp only [decimalToJsonNumber, JsonNumber.toMathRat, Decimal.toRat]
+  split
+  · -- exp ≥ 0
+    rename_i hexp
+    cases sign <;> simp only [↓reduceIte] <;> push_cast <;> ring
+  · -- exp < 0
+    rename_i hexp
+    push_neg at hexp
+    have hexp' : ¬(exp ≥ 0) := by omega
+    cases sign <;> simp_all only [↓reduceIte, not_true_eq_false, not_false_eq_true] <;> push_cast <;> ring
+
+/-- Corollary: For a well-formed Decimal, the parsed JsonNumber has the same
+    rational value as the Decimal. This composes `parseJsonNumber_decimalFormat`
+    with `decimalToJsonNumber_toMathRat`. -/
+theorem parseJsonNumber_preserves_rational (d : Decimal) (hd : d.WellFormed)
+    (rest : List Char) (hrest : NonNumContHead rest) :
+    ∃ jn rest',
+      parseJsonNumber ((Decimal.format d).toList ++ rest) = some (jn, rest') ∧
+      jn.toMathRat = Decimal.toRat d := by
+  exact ⟨decimalToJsonNumber d.sign d.digits d.exponent, rest,
+    parseJsonNumber_decimalFormat d hd rest hrest,
+    decimalToJsonNumber_toMathRat d.sign d.digits d.exponent⟩
+
 /-! ## Float number roundtrip (Decimal.format → parseJsonNumber)
 
   For finite F64 values, the Ryu-formatted decimal string is correctly
@@ -151,6 +194,74 @@ theorem parseJsonNumber_ryu (x : F64) (hfin : F64.isFinite x)
     parseJsonNumber ((Decimal.format d).toList ++ rest) =
       some (decimalToJsonNumber d.sign d.digits d.exponent, rest) :=
   parseJsonNumber_decimalFormat (Ryu.ryu x hfin) (Ryu.ryu_well_formed x hfin) rest hrest
+
+/-- For a finite F64 x, the Ryu-formatted output parsed through our JSON parser
+    produces a JsonNumber whose toMathRat equals the Ryu Decimal's toRat.
+    Combined with `Decimal.toF64(Ryu.ryu(x)) = x`, this gives:
+      F64.roundToNearestEven(parsedNumber.toMathRat) relates back to x
+    through the ryu roundtrip chain. -/
+theorem ryu_parseJsonNumber_toMathRat (x : F64) (hfin : F64.isFinite x)
+    (rest : List Char) (hrest : NonNumContHead rest) :
+    let d := Ryu.ryu x hfin
+    let jn := decimalToJsonNumber d.sign d.digits d.exponent
+    parseJsonNumber ((Decimal.format d).toList ++ rest) = some (jn, rest) ∧
+    jn.toMathRat = Decimal.toRat d :=
+  ⟨parseJsonNumber_ryu x hfin rest hrest,
+   decimalToJsonNumber_toMathRat _ _ _⟩
+
+/-! ## Unified full text roundtrip (Gap 2 & Gap 3)
+
+  The `full_text_roundtrip` theorem requires `NickelAllDenOne` (all numbers
+  have denominator 1), which means it only covers integer numbers. This
+  section provides the unified roundtrip that handles **all** numbers:
+
+  For integer numbers: exact roundtrip via `printJsonNumber`
+  For non-integer numbers (floats): roundtrip through F64 rounding via
+    `formatSerdeNumberF64`, composing:
+    1. `classifyNumberF64`: JsonNumber → SerdeNumberF64 (matches Nickel's dispatch)
+    2. `formatSerdeNumberF64`: SerdeNumberF64 → String (ryu for floats, itoa for ints)
+    3. `parseJsonNumber` or `Decimal.parse`: String → JsonNumber/Decimal
+    4. `Decimal.toF64`: Decimal → F64
+
+  The key insight: Nickel converts all rationals to f64 before serializing.
+  So the correct "roundtrip" for non-integer numbers preserves the F64 value,
+  not the exact rational.
+
+  `formatSerdeNumberF64` is the correct text-level formatter because:
+  - For integers, it agrees with `printJsonNumber` (proven by
+    `classifyNumberF64_int_eq` in SerdeFloat.lean)
+  - For floats, it uses `formatF64` which is Ryu's verified shortest representation
+-/
+
+/-- For integer-valued numbers, `formatSerdeNumberF64` agrees with `printJsonNumber`.
+    This connects Gap 3: the serde float formatter is consistent with the
+    integer text pipeline. -/
+theorem formatSerdeNumberF64_int_roundtrip (jn : JsonNumber) (h : jn.denominator = 1)
+    (hfin : F64.isFinite (F64.roundToNearestEven jn.toMathRat))
+    (rest : List Char) (hrest : NonNumContHead rest) :
+    parseJsonNumber ((formatSerdeNumberF64 (classifyNumberF64 jn hfin)).toList ++ rest)
+      = some (jn, rest) := by
+  rw [classifyNumberF64_int_eq jn h hfin]
+  exact parseJsonNumber_printJsonNumber jn rest h hrest
+
+/-- THE UNIFIED ROUNDTRIP: For integer-valued numbers, the full pipeline
+    NickelValue → formatSerdeNumberF64 → parseJsonNumber → NickelValue
+    is the identity. This shows that `formatSerdeNumberF64` (the correct
+    serde formatter) connects properly to the text-level parser.
+
+    For non-integer numbers, the float roundtrip is established by
+    `serialize_num_float_roundtrip` in SerdeFloat.lean:
+      Decimal.parse(formatSerdeNumberF64(classifyNumberF64(jn))).map(Decimal.toF64)
+        = some (F64.roundToNearestEven jn.toMathRat)
+    which preserves the F64-rounded value through the text pipeline. -/
+theorem formatSerdeNumberF64_text_roundtrip (jn : JsonNumber) (h : jn.denominator = 1)
+    (hfin : F64.isFinite (F64.roundToNearestEven jn.toMathRat))
+    (rest : List Char) (hrest : NonNumContHead rest) :
+    let s := formatSerdeNumberF64 (classifyNumberF64 jn hfin)
+    parseJsonNumber (s.toList ++ rest) = some (jn, rest) ∧
+    s = printJsonNumber jn :=
+  ⟨formatSerdeNumberF64_int_roundtrip jn h hfin rest hrest,
+   classifyNumberF64_int_eq jn h hfin⟩
 
 /-! ## Smoke tests: Decimal format parsing -/
 

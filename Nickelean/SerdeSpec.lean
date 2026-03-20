@@ -9,7 +9,8 @@
   - String escaping: escapeJsonString (fixed in Phase 1 for \b/\f)
   - Integer formatting: itoa-compatible plain decimal
   - Structural formatting: compact (no whitespace)
-  - Float formatting: placeholder for Phase 4 (ryu-lean4 integration)
+  - Float formatting: see `SerdeNumberF64` in SerdeFloat.lean for the
+    verified ryu-lean4 integration
 
   The main theorem (formatSerdeNumber_matches_printJsonNumber) shows that for
   integer-valued numbers, our printJsonValue ∘ toJson produces the
@@ -24,11 +25,16 @@ import Nickelean.ToJson
     Matches the three variants of serde_json::Number:
     - PosInt(u64): non-negative integer
     - NegInt(i64): negative integer
-    - Float(f64): floating-point (any non-integer, or integer outside i64/u64 range) -/
+    - Float(f64): floating-point (any non-integer, or integer outside i64/u64 range)
+
+    For the float case with verified formatting, use `SerdeNumberF64` in
+    SerdeFloat.lean, which carries a concrete F64 value and uses ryu-lean4.
+    In this type, the float case carries the pre-formatted string, matching
+    serde_json's behavior of delegating to ryu for float formatting. -/
 inductive SerdeNumber where
   | posInt (n : Nat)
   | negInt (n : Int) (h : n < 0)
-  | float -- placeholder: Phase 4 will carry an F64 value from ryu-lean4
+  | float (formatted : String)
   deriving Repr
 
 /-! ## Nickel's number classification -/
@@ -38,7 +44,9 @@ inductive SerdeNumber where
     1. If integer (denominator divides numerator evenly):
        - If negative: NegInt
        - If non-negative: PosInt
-    2. Otherwise: Float -/
+    2. Otherwise: Float with a placeholder string.
+       For verified float formatting, use `classifyNumberF64` from
+       SerdeFloat.lean which provides the real ryu output. -/
 def classifyNumber (jn : JsonNumber) : SerdeNumber :=
   if jn.numerator % jn.denominator == 0 then
     let intVal := jn.numerator / jn.denominator
@@ -47,17 +55,23 @@ def classifyNumber (jn : JsonNumber) : SerdeNumber :=
     else
       .posInt intVal.toNat
   else
-    .float
+    -- In actual serde_json, this would call ryu to format the f64.
+    -- For the verified version with a concrete F64, see classifyNumberF64
+    -- in SerdeFloat.lean, which produces a SerdeNumberF64 with full
+    -- roundtrip guarantees via ryu-lean4.
+    .float "<float>"
 
 /-! ## Integer formatting (matching itoa) -/
 
 /-- Format a SerdeNumber as a JSON number string.
     For integers, matches the itoa crate's output (plain decimal).
-    For floats, returns a placeholder — Phase 4 will use ryu-lean4. -/
+    For floats, returns the pre-formatted string (from ryu in practice).
+    For the verified float pipeline, use `formatSerdeNumberF64` from
+    SerdeFloat.lean. -/
 def formatSerdeNumber : SerdeNumber → String
   | .posInt n => printNat n
   | .negInt n _ => "-" ++ printNat n.natAbs
-  | .float => "0" -- placeholder
+  | .float s => s
 
 /-- An integer-valued JsonNumber has denominator dividing the numerator. -/
 def JsonNumber.isInteger (jn : JsonNumber) : Prop :=
@@ -105,7 +119,12 @@ theorem formatSerdeNumber_matches_printJsonNumber (jn : JsonNumber) (h : jn.deno
 mutual
 /-- The serde_json compact serialization spec.
     Matches serde_json::to_string for compact (no whitespace) formatting.
-    Strings are already escaped by the caller (matching our toJson pipeline). -/
+    Strings are already escaped by the caller (matching our toJson pipeline).
+
+    For integer-valued numbers (denominator=1), this produces the same output
+    as `printJsonValue` (proven by `serdeJsonSerialize_number_eq`).
+    For non-integer numbers, uses `classifyNumber` which delegates to the
+    float formatter; for the verified version, see `SerdeFloat.lean`. -/
 def serdeJsonSerialize : JsonValue → String
   | .null => "null"
   | .bool true => "true"
