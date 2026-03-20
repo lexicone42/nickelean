@@ -4,12 +4,24 @@ Formally verified JSON serialization for [Nickel](https://nickel-lang.org/) valu
 
 ## Main theorems
 
-**Text-level roundtrip** — Serialize a Nickel value to a JSON string, parse it back, recover the original:
+**Text-level roundtrip (integers)** — Serialize a Nickel value to a JSON string, parse it back, recover the original:
 
 ```lean
 theorem full_text_roundtrip (v : NickelValue) (hdo : NickelAllDenOne v) :
     (parseJV ((printJsonValue (toJson v)).toList) (jsonSize (toJson v))).bind
       (fun ⟨jv, _⟩ => fromJson jv) = some v
+```
+
+**Float roundtrip through JSON parser** — For any finite F64, parsing its Ryu-formatted output with our JSON parser and rounding back gives the original F64:
+
+```lean
+theorem float_text_roundtrip_f64 (x : F64) (hfin : F64.isFinite x)
+    (rest : List Char) (hrest : NonNumContHead rest)
+    (hne : (Ryu.ryu x hfin).digits ≠ 0) :
+    let d := Ryu.ryu x hfin
+    let jn := decimalToJsonNumber d.sign d.digits d.exponent
+    parseJsonNumber ((Decimal.format d).toList ++ rest) = some (jn, rest) ∧
+    F64.roundToNearestEven jn.toMathRat = x
 ```
 
 **AST-level roundtrip** — The foundational theorem, unconditional on all NickelValues:
@@ -115,9 +127,10 @@ The Lean model is independently written, not extracted from Nickel's Rust code. 
 
 ### Known limitations
 
-- **Float numbers in text roundtrip** — `full_text_roundtrip` requires integer-valued numbers. Float formatting roundtrips are proven separately via `serialize_num_float_roundtrip` (at the number level, not yet composed into the text parser). Extending the JSON text parser to handle decimal/scientific notation would close this gap.
-- **Numbers are exact rationals** — `JsonNumber` uses `Int / Nat`, not floating-point. The AST roundtrip holds unconditionally for all rationals. Non-canonical equality (`1/2 ≠ 2/4`) by design.
-- **serde_json version** — Spec targets v1.0.140 (uses ryu for floats). Nickel could upgrade to v1.0.147+ (uses zmij), which would need spec updates.
+- **Two roundtrip theorems, not one** — Integer numbers have a complete end-to-end text roundtrip (`full_text_roundtrip`). Float numbers have a complete roundtrip through our JSON parser (`float_text_roundtrip_f64`). These are proven separately; there is no single unified theorem handling a NickelValue tree with mixed integer and float numbers. Composing them for a mixed tree requires applying each theorem to the appropriate numbers.
+- **`json_roundtrip_sorted` is existential** — `toJsonSorted` (matching Nickel's alphabetical field ordering) is proven to always deserialize successfully (`∃ v', fromJson(toJsonSorted v) = some v'`), but the exact relationship between the output `v'` and the input `v` (which differ by field reordering) is not characterized.
+- **Numbers are exact rationals** — `JsonNumber` uses `Int / Nat`, not floating-point. Non-canonical equality (`1/2 ≠ 2/4`) by design.
+- **serde_json version** — Spec targets v1.0.140 (uses ryu for floats). Nickel could upgrade to v1.0.147+ (uses zmij), which would require parser updates for `e+` notation.
 
 ## Related work
 
