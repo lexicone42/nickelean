@@ -17,3 +17,4 @@ import Nickelean.SerdeFloat
 import Nickelean.ParseJsonText
 import Nickelean.DecimalParseRoundtrip
 import Nickelean.FullTextRoundtrip
+import Nickelean.UnifiedRoundtrip
