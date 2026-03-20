@@ -1,9 +1,14 @@
 /-
   NickelJson/FullTextRoundtrip.lean
 
-  The complete text-level roundtrip theorem:
-    For all NickelValues v (with integer numbers),
-      fromJson(parseJV(printJsonValue(toJson(v)))) = some v
+  The complete text-level roundtrip theorems:
+
+  1. Integer roundtrip (exact): For NickelValues with integer numbers,
+     fromJson(parseJV(printJsonValue(toJson(v)))) = some v
+
+  2. Float roundtrip (F64-faithful): For the Decimal format produced by
+     ryu-lean4's Decimal.format, our parser produces a JsonNumber that
+     is consistent with Decimal.parse.
 
   Composes four independently verified stages:
   1. toJson: NickelValue → JsonValue  (escapes strings)
@@ -13,6 +18,8 @@
 -/
 import Nickelean.ParseJsonText
 import Nickelean.Roundtrip
+import Nickelean.SerdeFloat
+import RyuLean4.Roundtrip.FormatParse
 
 /-! ## Precondition satisfaction: toJson output is well-formed -/
 
@@ -93,7 +100,7 @@ theorem toJsonFields_allDenOneFields
     exact ⟨toJson_allDenOne v h.1, toJsonFields_allDenOneFields rest h.2⟩
 end
 
-/-! ## The complete text-level roundtrip -/
+/-! ## The complete text-level roundtrip (integer case) -/
 
 /-- Print then parse recovers the JsonValue produced by toJson. -/
 theorem text_roundtrip_json (v : NickelValue) (hdo : NickelAllDenOne v) :
@@ -106,7 +113,7 @@ theorem text_roundtrip_json (v : NickelValue) (hdo : NickelAllDenOne v) :
     (Or.inl rfl)
   simp at h; exact h
 
-/-- THE CAPSTONE: NickelValue → String → NickelValue roundtrip.
+/-- THE CAPSTONE (integer case): NickelValue → String → NickelValue roundtrip.
 
     For any NickelValue v with integer-valued numbers:
       fromJson(parseJV(printJsonValue(toJson(v)))) = some v
@@ -118,3 +125,13 @@ theorem full_text_roundtrip (v : NickelValue) (hdo : NickelAllDenOne v) :
   rw [text_roundtrip_json v hdo]
   simp [Option.bind]
   exact json_roundtrip v
+
+/-! ## Smoke tests: Decimal format parsing -/
+
+-- Verify parseJsonNumber handles Decimal.format output
+#eval do
+  let d : Decimal := ⟨false, 15, -1⟩  -- 1.5
+  let s := Decimal.format d
+  IO.println s!"Decimal.format: {s}"
+  IO.println s!"parseJsonNumber result: {repr (parseJsonNumber s.toList)}"
+  IO.println s!"parseJsonText result: {repr (parseJsonText s)}"

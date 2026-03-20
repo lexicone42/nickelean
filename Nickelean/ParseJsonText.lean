@@ -6,10 +6,19 @@
 
   The parser operates on List Char and uses fuel for termination.
   All recursive calls decrease fuel by at least 1.
+
+  The number parser handles two formats:
+  1. Plain integers: [-]<digits>  (from printJsonNumber with den=1)
+  2. Decimal/scientific: [-]<digit>[.<digits>]e<int>  (from Decimal.format)
+
+  These are distinguished by the presence of 'e' after initial digits.
 -/
 import Nickelean.PrintJson
 import Nickelean.Escape
 import Nickelean.Roundtrip.EscapeRoundtrip
+import RyuLean4.Decimal.Decimal
+import RyuLean4.Decimal.Format
+import RyuLean4.Decimal.Parse
 
 /-! ## Number parsing -/
 
@@ -29,15 +38,59 @@ def parseJsonNatAux : List Char → Nat → Bool → Option (Nat × List Char)
 def parseJsonNat (chars : List Char) : Option (Nat × List Char) :=
   parseJsonNatAux chars 0 false
 
-/-- Parse a JSON integer number. -/
+/-- Parse an integer (possibly with leading minus sign).
+    Delegates to Decimal.parseInt for reuse of existing roundtrip proofs. -/
+def parseJsonInt (chars : List Char) : Option (Int × List Char) :=
+  Decimal.parseInt chars
+
+/-- Convert a Decimal (sign, digits, exponent) to a JsonNumber.
+    The Decimal represents (-1)^sign × digits × 10^exponent.
+    - If exponent ≥ 0: JsonNumber(±(digits × 10^exp), 1)
+    - If exponent < 0: JsonNumber(±digits, 10^(-exp)) -/
+def decimalToJsonNumber (sign : Bool) (digits : Nat) (exponent : Int) : JsonNumber :=
+  let signedDigits : Int := if sign then -(digits : Int) else (digits : Int)
+  if h : exponent ≥ 0 then
+    ⟨signedDigits * (10 ^ exponent.toNat : Nat), 1, by omega⟩
+  else
+    ⟨signedDigits, 10 ^ (-exponent).toNat, by positivity⟩
+
+/-- After parsing initial digits `n` from a number, handle the rest:
+    - If 'e' follows: scientific notation without fraction
+    - If '.' follows: scientific notation with fraction
+    - Otherwise: plain integer -/
+def parseJsonNumberTail (sign : Bool) (n : Nat) (rest : List Char) : Option (JsonNumber × List Char) :=
+  match rest with
+  | 'e' :: expRest =>
+    match Decimal.parseInt expRest with
+    | some (exp, rest') => some (decimalToJsonNumber sign n exp, rest')
+    | none => none
+  | '.' :: fracRest =>
+    match Decimal.parseNat fracRest with
+    | some (frac, 'e' :: expRest) =>
+      let numFrac := fracRest.length - expRest.length - 1
+      match Decimal.parseInt expRest with
+      | some (exp, rest') =>
+        let fullDigits := n * 10 ^ numFrac + frac
+        let fullExp := exp - (numFrac : Int)
+        some (decimalToJsonNumber sign fullDigits fullExp, rest')
+      | none => none
+    | _ => none
+  | _ =>
+    let signedN : Int := if sign then -(n : Int) else (n : Int)
+    some (⟨signedN, 1, by omega⟩, rest)
+
+/-- Parse a JSON number, handling both integer and scientific notation formats.
+    - Plain integers: [-]<digits>
+    - Scientific: [-]<digit>[.<digits>]e<int>
+    Uses Decimal.parseNat (equivalent to parseJsonNat) for digit parsing. -/
 def parseJsonNumber : List Char → Option (JsonNumber × List Char)
   | '-' :: rest =>
-    match parseJsonNat rest with
-    | some (n, rest') => some (⟨-(n : Int), 1, by omega⟩, rest')
+    match Decimal.parseNat rest with
+    | some (n, rest') => parseJsonNumberTail true n rest'
     | none => none
   | chars =>
-    match parseJsonNat chars with
-    | some (n, rest) => some (⟨(n : Int), 1, by omega⟩, rest)
+    match Decimal.parseNat chars with
+    | some (n, rest) => parseJsonNumberTail false n rest
     | none => none
 
 /-! ## String parsing -/
@@ -126,6 +179,14 @@ def parseJsonText (s : String) (fuel : Nat := s.length + 1) : Option JsonValue :
 #eval parseJsonText "{}"
 #eval parseJsonText "[1,\"two\",true,null]"
 #eval parseJsonText "{\"a\":[1],\"b\":{\"c\":null}}"
+
+-- Scientific notation smoke tests
+#eval parseJsonText "1e0"       -- 1
+#eval parseJsonText "1e2"       -- 100
+#eval parseJsonText "-5e1"      -- -50
+#eval parseJsonText "1.5e1"     -- 15
+#eval parseJsonText "1.5e-1"    -- 15/100 = 3/20... but we store as 15/10
+#eval parseJsonNumber "1.5e-1".toList  -- should parse
 
 /-! ## Roundtrip: parseJV ∘ printJsonValue = id
 
@@ -293,6 +354,18 @@ theorem parseJsonNatAux_allDigits (ds rest : List Char) (acc : Nat) (consumed : 
 abbrev NonDigitHead (rest : List Char) : Prop :=
   rest = [] ∨ ∃ c t, rest = c :: t ∧ ¬('0' ≤ c ∧ c ≤ '9')
 
+/-- Rest starts with a character that cannot continue a number.
+    Excludes digits, 'e', 'E', '.', '-', '+'.
+    This is needed for the extended parser which handles scientific notation. -/
+abbrev NonNumContHead (rest : List Char) : Prop :=
+  rest = [] ∨ ∃ c t, rest = c :: t ∧ ¬('0' ≤ c ∧ c ≤ '9') ∧ c ≠ 'e' ∧ c ≠ '.'
+
+theorem NonNumContHead.toNonDigitHead {rest : List Char} (h : NonNumContHead rest) :
+    NonDigitHead rest := by
+  rcases h with rfl | ⟨c, t, rfl, hnd, _, _⟩
+  · exact Or.inl rfl
+  · exact Or.inr ⟨c, t, rfl, hnd⟩
+
 theorem parseJsonNat_printNat (n : Nat) (rest : List Char) (hrest : NonDigitHead rest) :
     parseJsonNat ((printNat n).toList ++ rest) = some (n, rest) := by
   simp [parseJsonNat]
@@ -308,6 +381,33 @@ theorem parseJsonNat_printNat (n : Nat) (rest : List Char) (hrest : NonDigitHead
         (printNatGo_allDigits (n+1)) hrest (Or.inr (printNatGo_ne_nil (n+1) (by omega)))]
     exact congrArg (fun x => some (x, rest)) (printNatGo_foldl_zero (n+1))
 
+/-- Decimal.parseNat also roundtrips with printNat.
+    Proof: Decimal.parseNatAux and parseJsonNatAux are equivalent (both accumulate
+    digit values), so the result follows from parseJsonNat_printNat. -/
+theorem decimalParseNat_printNat (n : Nat) (rest : List Char) (hrest : NonDigitHead rest) :
+    Decimal.parseNat ((printNat n).toList ++ rest) = some (n, rest) := by
+  suffices h : parseJsonNat ((printNat n).toList ++ rest) = Decimal.parseNat ((printNat n).toList ++ rest) by
+    rw [← h]; exact parseJsonNat_printNat n rest hrest
+  simp only [parseJsonNat, Decimal.parseNat]
+  -- Need: parseJsonNatAux = Decimal.parseNatAux
+  suffices ∀ (cs : List Char) (a : Nat) (b : Bool),
+    parseJsonNatAux cs a b = Decimal.parseNatAux cs a b by
+    exact this _ 0 false
+  intro cs
+  induction cs with
+  | nil => intro a b; cases b <;> simp [parseJsonNatAux, Decimal.parseNatAux]
+  | cons c rest ih =>
+    intro a b
+    simp only [parseJsonNatAux, Decimal.parseNatAux, Decimal.parseDigitChar]
+    by_cases hd : '0' ≤ c ∧ c ≤ '9'
+    · have hb : ('0' ≤ c && c ≤ '9') = true := by simp [hd.1, hd.2]
+      simp only [hd]; exact ih _ _
+    · have hb : ('0' ≤ c && c ≤ '9') = false := by
+        cases h : ('0' ≤ c && c ≤ '9')
+        · rfl
+        · exfalso; simp [Bool.and_eq_true] at h; exact hd h
+      simp only [hd, hb, ↓reduceIte]; cases b <;> rfl
+
 theorem printNat_ne_nil (n : Nat) : (printNat n).toList ≠ [] := by
   cases n with
   | zero => simp [printNat]
@@ -321,46 +421,88 @@ theorem printNat_first_digit (n : Nat) (c : Char) (cs : List Char)
     simp [printNat, String.toList_ofList] at h
     exact printNatGo_allDigits (n+1) c (by rw [h]; exact List.mem_cons_self)
 
+/-- parseJsonNumberTail on a list not headed by 'e' or '.' returns plain integer -/
+theorem parseJsonNumberTail_int (sign : Bool) (n : Nat) (rest : List Char)
+    (hne : ∀ expRest, rest ≠ 'e' :: expRest) (hndot : ∀ fracRest, rest ≠ '.' :: fracRest) :
+    parseJsonNumberTail sign n rest =
+      some (⟨if sign then -(n : Int) else (n : Int), 1, by omega⟩, rest) := by
+  unfold parseJsonNumberTail
+  split
+  · -- 'e' :: expRest case: impossible
+    exact absurd rfl (hne _)
+  · -- '.' :: fracRest case: impossible
+    exact absurd rfl (hndot _)
+  · -- catch-all: plain integer
+    rfl
+
 theorem parseJsonNumber_printJsonNumber (jn : JsonNumber) (rest : List Char)
-    (hden : jn.denominator = 1) (hrest : NonDigitHead rest) :
+    (hden : jn.denominator = 1) (hrest : NonNumContHead rest) :
     parseJsonNumber ((printJsonNumber jn).toList ++ rest) = some (jn, rest) := by
   simp only [printJsonNumber, hden, beq_self_eq_true, ↓reduceIte]
+  have hrest_nd := hrest.toNonDigitHead
+  -- rest doesn't start with 'e' or '.'
+  have hne : ∀ expRest, rest ≠ 'e' :: expRest := by
+    rcases hrest with rfl | ⟨c, t, rfl, _, hce, _⟩
+    · intro _ h; exact List.cons_ne_nil _ _ h.symm
+    · intro expRest h; exact hce (List.cons.inj h).1
+  have hndot : ∀ fracRest, rest ≠ '.' :: fracRest := by
+    rcases hrest with rfl | ⟨c, t, rfl, _, _, hcd⟩
+    · intro _ h; exact List.cons_ne_nil _ _ h.symm
+    · intro fracRest h; exact hcd (List.cons.inj h).1
   by_cases hneg : jn.numerator < 0
   · -- Negative: "-" ++ printNat |num|
-    simp only [hneg, ↓reduceIte, String.toList_append,
-               List.append_assoc, List.nil_append]
-    -- parseJsonNumber ('-' :: ...) reduces by definition
-    show (match parseJsonNat ((printNat jn.numerator.natAbs).toList ++ rest) with
-      | some (n, rest') => some (JsonNumber.mk (-(n : Int)) 1 (by omega), rest')
-      | none => none) = some (jn, rest)
-    rw [parseJsonNat_printNat jn.numerator.natAbs rest hrest]
-    -- Now match reduces: some (⟨-↑natAbs, 1, _⟩, rest) = some (jn, rest)
-    congr 1; cases jn with | mk num den hd =>
-      simp at hden hneg; subst hden
-      simp [JsonNumber.mk.injEq]; omega
+    simp only [hneg, ↓reduceIte, String.toList_append, List.append_assoc]
+    show parseJsonNumber ('-' :: ((printNat jn.numerator.natAbs).toList ++ rest)) = some (jn, rest)
+    simp only [parseJsonNumber, decimalParseNat_printNat _ _ hrest_nd,
+               parseJsonNumberTail_int _ _ _ hne hndot, ↓reduceIte]
+    -- Goal: some (⟨-(natAbs .. : Int), 1, _⟩, rest) = some (jn, rest)
+    have hna : -(jn.numerator.natAbs : Int) = jn.numerator := by
+      rcases Int.natAbs_eq jn.numerator with h | h <;> omega
+    cases jn with | mk num den hd =>
+      simp at hden; subst hden; simp_all
   · -- Non-negative: printNat num
     simp only [hneg, ↓reduceIte]
     rw [show jn.numerator.natAbs = jn.numerator.toNat from by omega]
     obtain ⟨c, cs, hcs⟩ := List.exists_cons_of_ne_nil (printNat_ne_nil jn.numerator.toNat)
-    -- First char is digit, not '-', so parseJsonNumber falls through to non-'-' case
     have hc_digit := printNat_first_digit jn.numerator.toNat c cs hcs
     rw [hcs, List.cons_append]
-    -- unfold parseJsonNumber to reduce the match on c :: ...
+    show parseJsonNumber (c :: (cs ++ rest)) = some (jn, rest)
     unfold parseJsonNumber
     split
-    · -- '-' :: rest' case: impossible since c is a digit
-      rename_i rest' heq
+    · rename_i rest' heq
       exfalso; have := (List.cons.inj heq).1; rw [this] at hc_digit
       exact absurd hc_digit (by decide)
-    · -- catch-all case: parseJsonNat (c :: cs ++ rest)
-      -- Goal has parseJsonNat (c :: (cs ++ rest)); need to rewrite c :: cs to printNat ...
-      -- Use conv to rewrite inside the match
-      have h_eq : c :: (cs ++ rest) = (printNat jn.numerator.toNat).toList ++ rest := by
+    · have h_eq : c :: (cs ++ rest) = (printNat jn.numerator.toNat).toList ++ rest := by
         rw [hcs, List.cons_append]
-      rw [h_eq, parseJsonNat_printNat jn.numerator.toNat rest hrest]
-      congr 1; cases jn with | mk num den hd =>
-        simp at hden hneg; subst hden
-        simp [JsonNumber.mk.injEq]; omega
+      simp only [h_eq, decimalParseNat_printNat _ _ hrest_nd,
+          parseJsonNumberTail_int _ _ _ hne hndot]
+      -- Goal: some (⟨(toNat .. : Int), 1, _⟩, rest) = some (jn, rest)
+      have htn : (jn.numerator.toNat : Int) = jn.numerator := by omega
+      cases jn with | mk num den hd =>
+        simp only at hden htn; subst hden; simp [htn]
+
+/-! ### Decimal format parsing -/
+
+/-- parseJsonNatAux and Decimal.parseNatAux are equivalent (both accumulate digit values). -/
+private theorem parseJsonNatAux_eq_decimal (chars : List Char) (acc : Nat) (consumed : Bool) :
+    parseJsonNatAux chars acc consumed = Decimal.parseNatAux chars acc consumed := by
+  induction chars generalizing acc consumed with
+  | nil => cases consumed <;> simp [parseJsonNatAux, Decimal.parseNatAux]
+  | cons c rest ih =>
+    simp only [parseJsonNatAux, Decimal.parseNatAux, Decimal.parseDigitChar]
+    by_cases hd : '0' ≤ c ∧ c ≤ '9'
+    · have hb : ('0' ≤ c && c ≤ '9') = true := by simp [hd.1, hd.2]
+      simp only [hd]; exact ih _ _
+    · have hb : ('0' ≤ c && c ≤ '9') = false := by
+        cases h : ('0' ≤ c && c ≤ '9')
+        · rfl
+        · exfalso; simp [Bool.and_eq_true] at h; exact hd h
+      simp only [hd, hb, ↓reduceIte]; cases consumed <;> rfl
+
+/-- parseJsonNat is equivalent to Decimal.parseNat. -/
+theorem parseJsonNat_eq_decimal (chars : List Char) :
+    parseJsonNat chars = Decimal.parseNat chars := by
+  simp [parseJsonNat, Decimal.parseNat, parseJsonNatAux_eq_decimal]
 
 /-! ### Size function for fuel -/
 
@@ -511,7 +653,7 @@ theorem parseJV_printJsonValue (jv : JsonValue) (rest : List Char) (fuel : Nat)
     (hfuel : fuel ≥ jsonSize jv)
     (hwf : WellFormedStrings jv)
     (hdo : AllDenOne jv)
-    (hrest : NonDigitHead rest) :
+    (hrest : NonNumContHead rest) :
     parseJV ((printJsonValue jv).toList ++ rest) fuel = some (jv, rest) := by
   cases jv with
   | null =>
@@ -612,7 +754,7 @@ theorem parseJArr_printJsonArray (elems : List JsonValue) (rest : List Char) (fu
     (hwf : WellFormedStringsList elems)
     (hdo : AllDenOneList elems)
     (hne : elems ≠ [])
-    (hrest : NonDigitHead rest) :
+    (hrest : NonNumContHead rest) :
     parseJArr ((printJsonArray elems).toList ++ [']'] ++ rest) fuel
       = some (elems, rest) := by
   obtain ⟨f, rfl⟩ : ∃ f, fuel = f + 1 := ⟨fuel - 1, by omega⟩
@@ -627,7 +769,7 @@ theorem parseJArr_printJsonArray (elems : List JsonValue) (rest : List Char) (fu
       simp only [List.singleton_append, List.append_assoc]
       rw [parseJV_printJsonValue v (']' :: rest) f
           (by rw [jsonSizeList.eq_2] at hfuel; omega)
-          hwf.1 hdo.1 (Or.inr ⟨']', rest, rfl, by decide⟩)]
+          hwf.1 hdo.1 (Or.inr ⟨']', rest, rfl, by decide, by decide, by decide⟩)]
       -- match on some (v, ']' :: rest) reduces to second branch
       rfl
     | cons w ws =>
@@ -639,7 +781,7 @@ theorem parseJArr_printJsonArray (elems : List JsonValue) (rest : List Char) (fu
       have hv := parseJV_printJsonValue v
             (',' :: ((printJsonArray (w :: ws)).toList ++ [']'] ++ rest)) f
             (by rw [jsonSizeList.eq_2] at hfuel; omega)
-            hwf.1 hdo.1 (Or.inr ⟨',', _, rfl, by decide⟩)
+            hwf.1 hdo.1 (Or.inr ⟨',', _, rfl, by decide, by decide, by decide⟩)
       have hrec := parseJArr_printJsonArray (w :: ws) rest f
             (by have h1 := jsonSizeList.eq_2 v (w :: ws)
                 have h3 : jsonSize v ≥ 1 := by cases v <;> simp [jsonSize] <;> omega
@@ -652,7 +794,7 @@ theorem parseJObj_printJsonObject (fields : List (String × JsonValue)) (rest : 
     (hwf : WellFormedStringsFields fields)
     (hdo : AllDenOneFields fields)
     (hne : fields ≠ [])
-    (hrest : NonDigitHead rest) :
+    (hrest : NonNumContHead rest) :
     parseJObj ((printJsonObject fields).toList ++ ['}'] ++ rest) fuel
       = some (fields, rest) := by
   obtain ⟨f, rfl⟩ : ∃ f, fuel = f + 1 := ⟨fuel - 1, by omega⟩
@@ -671,7 +813,7 @@ theorem parseJObj_printJsonObject (fields : List (String × JsonValue)) (rest : 
           (':' :: ((printJsonValue v).toList ++ '}' :: rest)) hwf.1
       have hpv := parseJV_printJsonValue v ('}' :: rest) f
           (by rw [jsonSizeFields.eq_2] at hfuel; omega)
-          hwf.2.1 hdo.1 (Or.inr ⟨'}', rest, rfl, by decide⟩)
+          hwf.2.1 hdo.1 (Or.inr ⟨'}', rest, rfl, by decide, by decide, by decide⟩)
       simp only [hsc, hpv, String.ofList_toList]
     | cons kv2 rest2 =>
       obtain ⟨k2, v2⟩ := kv2
@@ -688,7 +830,7 @@ theorem parseJObj_printJsonObject (fields : List (String × JsonValue)) (rest : 
       have hpv := parseJV_printJsonValue v
           (',' :: ((printJsonObject ((k2, v2) :: rest2)).toList ++ ['}'] ++ rest)) f
           (by rw [jsonSizeFields.eq_2] at hfuel; omega)
-          hwf.2.1 hdo.1 (Or.inr ⟨',', _, rfl, by decide⟩)
+          hwf.2.1 hdo.1 (Or.inr ⟨',', _, rfl, by decide, by decide, by decide⟩)
       have hrec := parseJObj_printJsonObject ((k2, v2) :: rest2) rest f
           (by have h1 := jsonSizeFields.eq_2 k v ((k2, v2) :: rest2)
               have h2 := jsonSizeFields.eq_2 k2 v2 rest2
