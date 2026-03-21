@@ -396,6 +396,7 @@ fn main() {
     let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("roundtrip");
 
     match cmd {
+        "float_vectors" => cmd_float_vectors(),
         "generate" => {
             let count = args
                 .get(2)
@@ -414,5 +415,17 @@ fn main() {
             eprintln!("Usage: nickelean-conformance <generate|roundtrip|escaping|nickel>");
             std::process::exit(1);
         }
+    }
+}
+
+fn cmd_float_vectors() {
+    use serde_json::Value;
+    let values: Vec<f64> = vec![0.1, 0.5, 1.5, 3.14159, -2.718, 1e10, 1e-10,
+                                 5e-324, 1.7976931348623157e308, -0.0, 0.0,
+                                 1.0/3.0, 2.0_f64.sqrt()];
+    for v in &values {
+        let json_val = Value::from(*v);
+        let s = serde_json::to_string(&json_val).unwrap();
+        println!("  f64={v:>25} → json={s}");
     }
 }

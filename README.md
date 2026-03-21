@@ -139,8 +139,9 @@ theorem number_serde_roundtrip_unified (jn : JsonNumber)
 
 ### Known limitations
 
+- **Float string format differs from serde_json** — Our `Decimal.format` always produces scientific notation (`1e-1`, `3.14159e0`). serde_json post-processes Ryu's output into "nicer" forms: `0.1` instead of `1e-1`, `10000000000.0` for integers-as-floats, `e+308` with explicit `+`. The DIGITS are identical (both come from Ryu), so the roundtrip is correct, but the character-level output format differs. Our parser handles both formats (`e`, `e+`, with/without decimal point).
 - **Numbers are exact rationals** — `JsonNumber` uses `Int / Nat`, not floating-point. Non-canonical equality (`1/2 ≠ 2/4`) by design.
-- **serde_json version** — Spec targets v1.0.140 (uses ryu for floats). Nickel could upgrade to v1.0.147+ (uses zmij), which would require parser updates for `e+` notation.
+- **serde_json version** — Spec targets v1.0.140 (uses ryu for floats). Nickel could upgrade to v1.0.147+ (uses zmij). Our parser accepts both `e` and `e+` notation.
 
 ## Related work
 

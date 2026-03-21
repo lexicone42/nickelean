@@ -78,7 +78,12 @@ def parseJsonNumberTail (sign : Bool) (n : Nat) (rest : List Char) : Option (Jso
         let fullExp := exp - (numFrac : Int)
         some (decimalToJsonNumber sign fullDigits fullExp, rest')
       | none => none
-    | _ => none
+    | some (frac, rest') =>
+      -- No exponent: e.g., "3.14" or "0.1" (serde_json format)
+      let numFrac := fracRest.length - rest'.length
+      let fullDigits := n * 10 ^ numFrac + frac
+      some (decimalToJsonNumber sign fullDigits (-(numFrac : Int)), rest')
+    | none => none
   | _ =>
     let signedN : Int := if sign then -(n : Int) else (n : Int)
     some (⟨signedN, 1, by omega⟩, rest)

@@ -128,6 +128,14 @@ private def checkJson (label : String) (input : String) (expected : JsonValue) :
     IO.eprintln s!"  PARSE FAILED {label}: input={input}"
     throw (IO.Error.userError s!"parser test failed: {label}")
 
+-- Helper to check that our parser successfully handles serde_json's output format
+private def checkParse (label : String) (input : String) : IO Unit := do
+  match parseJsonText input with
+  | some _ => IO.println s!"  PARSE OK {label}: {input}"
+  | none =>
+    IO.eprintln s!"  PARSE FAILED {label}: {input}"
+    throw (IO.Error.userError s!"parser test failed: {label}")
+
 #eval do
   IO.println "Decimal notation parser tests:"
 
@@ -200,4 +208,25 @@ private def checkJson (label : String) (input : String) (expected : JsonValue) :
   checkNum "1.5e+1" "1.5e+1" 15 1
   checkNum "-3e+0" "-3e+0" (-3) 1
 
-  IO.println s!"Decimal notation: all 22 tests passed!"
+  -- 6. serde_json actual float output format (from `cargo run -- float_vectors`)
+  -- These test that our parser handles serde_json's post-processed Ryu output
+  checkParse "serde_0.1" "0.1"           -- serde_json output for 0.1f64
+  checkParse "serde_0.5" "0.5"
+  checkParse "serde_1.5" "1.5"
+  checkParse "serde_pi" "3.14159"
+  checkParse "serde_neg" "-2.718"
+  checkParse "serde_big" "10000000000.0" -- integer-as-float with .0
+  checkParse "serde_sci" "1e-10"
+  checkParse "serde_subnorm" "5e-324"    -- smallest subnormal
+  checkParse "serde_max" "1.7976931348623157e+308"  -- max finite, with e+
+  checkParse "serde_negzero" "-0.0"      -- negative zero
+  checkParse "serde_zero" "0.0"          -- positive zero with .0
+  checkParse "serde_third" "0.3333333333333333"
+  checkParse "serde_sqrt2" "1.4142135623730951"
+
+  -- 7. Parser on JSON structures with serde_json float format
+  checkParse "serde_obj" "{\"x\":0.1,\"y\":-2.718}"
+  checkParse "serde_arr" "[0.1,1.5,3.14159]"
+  checkParse "serde_mixed" "{\"n\":42,\"f\":0.1,\"s\":\"hello\"}"
+
+  IO.println s!"Decimal notation + serde float format: all 38 tests passed!"

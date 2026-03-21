@@ -232,7 +232,10 @@ theorem parseJsonNumber_decimalFormat (d : Decimal) (hd : d.WellFormed) (rest : 
                 let fullExp := exp - (numFrac : Int)
                 some (decimalToJsonNumber s fullDigits fullExp, rest')
               | none => none
-            | _ => none) := by unfold parseJsonNumberTail; rfl
+            | some (frac, rest') =>
+              let numFrac := (tail ++ eRest).length - rest'.length
+              some (decimalToJsonNumber s (d1 * 10 ^ numFrac + frac) (-(numFrac : Int)), rest')
+            | none => none) := by unfold parseJsonNumberTail; rfl
         rw [this, hpn_tail, show eRest = 'e' :: (eDigits ++ rest) from rfl]
         simp only []
         rw [show eDigits ++ rest = Decimal.intToDigits adjExp ++ rest from rfl,
