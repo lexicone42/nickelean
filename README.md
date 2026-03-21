@@ -58,7 +58,7 @@ The library verifies the complete JSON serialization pipeline for Nickel values:
 
 6. **Record field sorting** — `toJsonSorted` matches Nickel's alphabetical field ordering.
 
-7. **33 cross-validation test vectors** — Compile-time verification that the Lean model's output matches `serde_json::to_string` for primitives, strings with escapes, arrays, objects, and nested structures.
+7. **71 cross-validation test vectors** — 33 serde_json output tests (primitives, strings, arrays, objects), 22 decimal/scientific notation parser tests (including zmij `e+` notation), and 16 serde_json float format tests (e.g. `0.1`, `1.7976931348623157e+308`). All verified at compile time.
 
 ## Project structure
 
@@ -73,11 +73,13 @@ Nickelean/
 ├── Roundtrip/
 │   └── EscapeRoundtrip.lean    # 5-layer escape roundtrip proof
 ├── PrintJson.lean              # JSON text printer (JsonValue → String)
-├── ParseJsonText.lean          # JSON text parser + text roundtrip proof (699 lines)
+├── ParseJsonText.lean          # JSON text parser + text roundtrip proof (850 lines)
 ├── FullTextRoundtrip.lean      # Capstone: NickelValue → String → NickelValue
 ├── SerdeSpec.lean              # serde_json serialization spec + integer proof
 ├── SerdeFloat.lean             # ryu-lean4 integration + float composition theorem
-├── CrossValidation.lean        # 33 cross-validation tests vs serde_json
+├── CrossValidation.lean        # 33 serde + 38 decimal/float cross-validation tests
+├── DecimalParseRoundtrip.lean  # parseJsonNumber roundtrips with Decimal.format
+├── UnifiedRoundtrip.lean       # Unified number roundtrip + sorted roundtrip + parseJV lift
 ├── Float64.lean                # IEEE 754 conformance predicates
 ├── RecordOrder.lean            # Field ordering and normalization
 ├── DecidableEq.lean            # DecidableEq for nested inductives
@@ -122,7 +124,7 @@ The Lean model is independently written, not extracted from Nickel's Rust code. 
 - **Formal spec matching**: `SerdeSpec.lean` formalizes serde_json's serialization behavior and proves it matches our printer for integer-valued numbers
 - **Float formatting**: `SerdeFloat.lean` connects to ryu-lean4's proven F64 roundtrip (same algorithm as serde_json v1.0.140)
 - **String escaping**: Fixed to match serde_json character-for-character (`\b`, `\f` as named escapes, not `\u0008`/`\u000c`)
-- **33 cross-validation tests**: Compile-time verification against serde_json output
+- **71 cross-validation tests**: 33 serde output + 22 decimal parser + 16 serde float format, all compile-time verified
 - **Rust differential testing**: 1000+ random roundtrip tests via the conformance suite
 
 **Unified number roundtrip** — A single theorem covering both integer and float numbers:
@@ -145,7 +147,8 @@ theorem number_serde_roundtrip_unified (jn : JsonNumber)
 
 ## Related work
 
-- [ryu-lean4](https://github.com/lexicone42/ryu-lean4) — Verified Ryu float-to-string roundtrip for all finite IEEE 754 doubles (~3,230 lines)
+- [ShortestDecimal](https://github.com/lexicone42/shortest-decimal) — Generic, formally verified roundtrip framework for IEEE 754 float-to-decimal algorithms (~7,848 lines). The algorithm-independent foundation.
+- [ryu-lean4](https://github.com/lexicone42/ryu-lean4) — Verified Ryu float-to-string roundtrip for all finite IEEE 754 doubles (~3,231 lines). Instantiates ShortestDecimal.
 - [Nickel](https://nickel-lang.org/) — The configuration language whose serialization we formalize
 - [Ryu paper](https://dl.acm.org/doi/10.1145/3296979.3192369) — Ulf Adams, PLDI 2018
 

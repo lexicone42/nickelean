@@ -183,7 +183,7 @@ The `RecordOrder.lean` module provides `normalizeFieldOrder` (recursive field so
 
 ## JSON text roundtrip (Gap 3 closure)
 
-The most substantial addition: a JSON text parser (`ParseJsonText.lean`, 699 lines) with a proven roundtrip against `printJsonValue`.
+The most substantial addition: a JSON text parser (`ParseJsonText.lean`, 850 lines) with a proven roundtrip against `printJsonValue`.
 
 The parser handles null, true, false, integers (with optional minus), quoted strings with escape sequences, arrays with comma-separated elements, and objects with "key":value pairs. It uses fuel-based termination.
 
@@ -212,9 +212,39 @@ The parser handles null, true, false, integers (with optional minus), quoted str
 - `serialize_num_float_roundtrip`: the composition theorem
 - `serialize_num_complete`: any JsonNumber either has an integer string or a float string that roundtrips
 
+## Decimal parse roundtrip (DecimalParseRoundtrip.lean)
+
+`DecimalParseRoundtrip.lean` (261 lines) proves that `parseJsonNumber` correctly inverts `Decimal.format`:
+
+```lean
+theorem parseJsonNumber_decimalFormat (d : Decimal) (hd : d.WellFormed) (rest : List Char)
+    (hrest : NonNumContHead rest) :
+    parseJsonNumber ((Decimal.format d).toList ++ rest) =
+      some (decimalToJsonNumber d.sign d.digits d.exponent, rest)
+```
+
+This bridges the gap between `Decimal.format` (used by Ryu) and `parseJsonNumber` (used by the JSON text parser). The proof splits into three cases: zero digits, single digit, and multi-digit (with decimal point), handling sign, fractional parsing, and exponent recovery in each case.
+
+## Unified roundtrip and lifted theorems (UnifiedRoundtrip.lean)
+
+`UnifiedRoundtrip.lean` (487 lines) addresses three concerns:
+
+**Concern 1: Unified number roundtrip** — A single theorem covering both integer and float numbers through the serde pipeline:
+
+```lean
+theorem number_serde_roundtrip_unified (jn : JsonNumber)
+    (hfin : F64.isFinite (F64.roundToNearestEven jn.toMathRat)) ...
+```
+
+For integers (denominator = 1), exact syntactic recovery. For non-integers, F64-faithful recovery.
+
+**Concern 2: Exact sorted roundtrip** — Strengthens the existential `json_roundtrip_sorted` to a constructive form showing the recovered value's `toJson` equals the sorted serialization. Proved by mutual induction paralleling the nested inductive structure.
+
+**Concern 3: Float roundtrip lifted to `parseJV`** — Shows that the full structural JSON parser (not just `parseJsonNumber`) correctly handles float-formatted numbers. The key lemma proves that `Decimal.format` output always starts with '-' or a digit, so `parseJV` falls through to its number-parsing branch.
+
 ## The capstone
 
-`FullTextRoundtrip.lean` (120 lines) composes everything:
+`FullTextRoundtrip.lean` (301 lines) composes everything:
 
 ```lean
 theorem full_text_roundtrip (v : NickelValue) (hdo : NickelAllDenOne v) :
@@ -228,13 +258,17 @@ The proof is 4 lines — all complexity is in the components.
 
 | Component | Lines | Technique |
 |-----------|-------|-----------|
-| JSON text parser + roundtrip proof | 699 | Fuel-based recursion, mutual induction |
-| serde_json spec + float composition | 319 | Ryu integration, number classification |
+| JSON text parser + roundtrip proof | 850 | Fuel-based recursion, mutual induction |
+| Unified roundtrip + sorted roundtrip + parseJV lift | 487 | Mutual induction, first-char analysis |
+| Full text roundtrip composition | 301 | Precondition satisfaction + 4-line proof |
 | Escape implementation + roundtrip | 283 | 5-layer pyramid, native_decide base cases |
+| Decimal parse roundtrip | 261 | Parser inversion via accumulator lemmas |
+| Record ordering | 248 | Permutation, field sorting |
+| Cross-validation tests (71 tests) | 232 | Compile-time serde_json + decimal + float format |
+| serde_json spec + float composition | 338 | Ryu integration, number classification |
 | DecidableEq instances | 159 | Exhaustive constructor case analysis |
-| Full text roundtrip composition | 120 | Precondition satisfaction + 4-line proof |
-| AST roundtrip + cross-validation | 216 | Mutual structural induction, 33 tests |
-| Core types + utilities | 462 | Dependent types, mutual recursion |
-| **Total Lean formalization** | **~2,260** | **Zero sorrys, zero axioms** |
-| **+ ryu-lean4** | **~3,230** | **IEEE 754 float-to-string roundtrip** |
-| **Combined system** | **~5,490** | **Full verified JSON serialization** |
+| Runtime tests | 152 | Differential testing |
+| Core types + utilities | 376 | Dependent types, mutual recursion |
+| **Total Lean formalization** | **~3,687** | **Zero sorrys, zero axioms** |
+| **+ ryu-lean4** | **~3,231** | **IEEE 754 float-to-string roundtrip** |
+| **Combined system** | **~6,918** | **Full verified JSON serialization** |
